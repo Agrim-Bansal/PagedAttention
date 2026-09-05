@@ -16,7 +16,7 @@ Beat 9 — Line chart: log-scale multi-series line chart.
 Beat 10 — Act checkpoint: the "where we are" seam beat.
 """
 
-from manim import DOWN, LEFT, RIGHT, UP, ORIGIN, FadeIn, FadeOut, GrowArrow
+from manim import DOWN, LEFT, RIGHT, UP, ORIGIN, FadeIn, FadeOut
 from manim_slides import Slide
 
 from talk.theme import *
@@ -116,7 +116,7 @@ class ScratchComponents(Slide):
         self.next_slide()
         self.play(FadeIn(diagram.keys), FadeIn(diagram.values), FadeIn(diagram.query))
         self.next_slide()
-        self.play(*[GrowArrow(a) for a in diagram.arrows])
+        self.play(*[shoot(a) for a in diagram.arrows])
         self.next_slide()
         self.play(FadeIn(diagram.weights))
         self.play(FadeIn(diagram.output))

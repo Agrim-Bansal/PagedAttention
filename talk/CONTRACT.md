@@ -43,9 +43,9 @@ Spec of *what* each scene shows: `../TALK_PLAN.md`. Paper facts: `../paper_notes
 | File | Class | Act | Target beats | Target minutes |
 |---|---|---|---|---|
 | s0_title.py | S0Title | I | 3–4 | 1–2 |
-| s1_transformers.py | S1Transformers | I | 6–8 | 4–5 |
-| s2_gpu.py | S2GPU | I | 4–5 | 3 |
-| s3_kvcache.py | S3KVCache | I | 5–7 | 4 |
+| s1_transformers.py | S1Transformers | I | 8–10 | 6 |
+| s2_gpu.py | S2GPU | I | 8–10 | ~6 |
+| s3_kvcache.py | S3KVCache | I | 10–12 | 9–11 |
 | s4_problem.py | S4Problem | I | 7–9 | 6–7 |
 | s5_pagedattention.py | S5PagedAttention | II | 9–12 | 7–8 |
 | s6_os_and_why_hard.py | S6OSAndWhyHard | II | 6–8 | 4–5 |
@@ -142,11 +142,28 @@ class GPUSchematic(VGroup):
     .cores (VGroup), .vram (Rectangle), .vram_label, .fill_vram(fraction, color) -> Animation"""
     def __init__(self, cores=(8, 6), width=5.0)
 
+class TransformerBox(VGroup):
+    """Opaque transformer (BLOCK_FILL / BLOCK_STROKE; ACCENT stroke when active).
+    .box, .label. set_active(bool) -> Animation."""
+    def __init__(self, width=6.4, height=2.2, label="TRANSFORMER")
+
+class TokenKV(VGroup):
+    """TokenBox plus K and V chips. .token, .k_chip, .v_chip, .q_chip (optional).
+    set_kv_opacity(alpha), show_query() -> Animation."""
+    def __init__(self, word, show_kv=True, kv_opacity=1.0, height=0.5, font_size=SMALL_SIZE)
+
+class TransformerLoop(VGroup):
+    """S1 spine: input sequence+KV above a centered TransformerBox, output below.
+    Box never moves. append_and_recenter(word) adds the output token onto the input
+    and recenters the input over the box. .box, .input, .in_arrow, .out_arrow, .output.
+    set_active(bool), set_kv_opacity(alpha), place_output(word), clear_output()."""
+    def __init__(self, words, show_kv=True, kv_opacity=0.25)
+
 def attention_diagram(tokens, query_index, kv_colors=True) -> VGroup
-    """Q/K/V computation visual: row of TokenBoxes, K and V stacks under each, a Q above the
-    query token, arrows from Q to each K, a softmax bar row, weighted sum arrow to output.
-    Returns VGroup with .tokens, .keys, .values, .query, .arrows, .weights, .output so scenes
-    can animate stepwise."""
+    """Q/K/V computation visual (scratch / overlay, not the S1 spine): row of TokenBoxes,
+    K and V under each, a Q above the query token, arrows from Q to each K, a softmax
+    bar row, weighted sum arrow to output. .tokens, .keys, .values, .query, .arrows,
+    .weights, .output."""
 
 def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, height=4,
               value_labels=False) -> VGroup

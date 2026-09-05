@@ -94,11 +94,9 @@ from manim import (
     Circle,
     FadeIn,
     FadeOut,
-    GrowArrow,
     Rectangle,
     Square,
     SurroundingRectangle,
-    Text,
     VGroup,
 )
 from manim_slides import Slide
@@ -119,6 +117,7 @@ from talk.theme import (
     body,
     caption,
     small,
+    text,
     title,
 )
 from talk.components import (
@@ -129,13 +128,14 @@ from talk.components import (
     PhysicalMemGrid,
     TokenBox,
     arrow_map,
+    shoot,
     token_sequence,
 )
 
 
 def _step_banner(text_str, color=ACCENT):
     """Small bottom-of-frame step label."""
-    t = Text(text_str, font_size=SMALL_SIZE, color=color, weight="BOLD")
+    t = text(text_str, font_size=SMALL_SIZE, color=color, weight="BOLD")
     t.to_edge(DOWN, buff=0.3)
     return t
 
@@ -143,7 +143,7 @@ def _step_banner(text_str, color=ACCENT):
 def _query_marker(label="Q"):
     """A small query-vector marker (square + label), Fig-5 style."""
     sq = Square(side_length=0.4, fill_color=Q_COLOR, fill_opacity=0.9, stroke_width=0)
-    lbl = Text(label, font_size=TINY_SIZE, color="#0f1117")
+    lbl = text(label, font_size=TINY_SIZE, color="#0f1117")
     lbl.move_to(sq.get_center())
     return VGroup(sq, lbl)
 
@@ -156,7 +156,7 @@ def _fill_slot_clean(block, i, word, color=ACCENT):
     keeps each label inside its own cell throughout. Mirrors the bookkeeping
     KVBlock.fill_slot does on .labels so later calls (fill/clear) stay
     consistent."""
-    new_label = Text(str(word), font_size=TINY_SIZE, color=FG)
+    new_label = text(str(word), font_size=TINY_SIZE, color=FG)
     if new_label.width > 0.9 * block.cell:
         new_label.scale_to_fit_width(0.9 * block.cell)
     new_label.move_to(block.cells[i].get_center())
@@ -247,7 +247,7 @@ class S5PagedAttention(Slide):
             a1 = arrow_map(logical_row[i], table2.rows[i]["mobject"][0], color=MUTED)
             a2 = arrow_map(table2.rows[i]["mobject"][1], physical_grid.block(phys_perm[i]), color=ACCENT)
             arrows2.add(a1, a2)
-        self.play(AnimationGroup(*[GrowArrow(a) for a in arrows2], lag_ratio=0.08))
+        self.play(AnimationGroup(*[shoot(a) for a in arrows2], lag_ratio=0.08))
 
         for i in range(2):
             self.play(*[physical_grid.block(phys_perm[i]).set_state(s, "filled") for s in range(4)])
@@ -294,17 +294,17 @@ class S5PagedAttention(Slide):
         a1 = arrow_map(query, block1, color=Q_COLOR)
         s1 = small("score block 1", color=ACCENT)
         s1.next_to(block1, UP, buff=0.35)
-        self.play(GrowArrow(a1), FadeIn(s1))
+        self.play(shoot(a1), FadeIn(s1))
 
         a2 = arrow_map(query, block2, color=Q_COLOR)
         s2 = small("score block 2", color=ACCENT)
         s2.next_to(block2, UP, buff=0.35)
-        self.play(GrowArrow(a2), FadeIn(s2))
+        self.play(shoot(a2), FadeIn(s2))
 
         a0 = arrow_map(query, block0, color=Q_COLOR)
         s0 = small("score block 0", color=ACCENT)
         s0.next_to(block0, RIGHT, buff=0.4)
-        self.play(GrowArrow(a0), FadeIn(s0))
+        self.play(shoot(a0), FadeIn(s0))
 
         combine_line = body("kernel fetches each block, scores it, then combines\n(the paper's Eq. 4)", font_size=SMALL_SIZE, color=GOOD, line_spacing=1.1)
         combine_line.to_edge(DOWN, buff=0.4)
@@ -369,7 +369,7 @@ class S5PagedAttention(Slide):
         self.play(row1_anim)
         arrow_a0 = arrow_map(table_a.rows[0]["mobject"][1], grid.block(7), color=ACCENT)
         arrow_a1 = arrow_map(table_a.rows[1]["mobject"][1], grid.block(1), color=ACCENT)
-        self.play(GrowArrow(arrow_a0), GrowArrow(arrow_a1))
+        self.play(shoot(arrow_a0), shoot(arrow_a1))
         self.wait(0.3)
         self.next_slide()
 
@@ -383,7 +383,7 @@ class S5PagedAttention(Slide):
         aq7 = arrow_map(q5, grid.block(7), color=Q_COLOR)
         aq1 = arrow_map(q5, grid.block(1), color=Q_COLOR)
         self.play(FadeIn(q5))
-        self.play(GrowArrow(aq7), GrowArrow(aq1))
+        self.play(shoot(aq7), shoot(aq1))
         step5_note = _step_banner("PagedAttention over physical blocks 7 and 1")
         self.play(FadeIn(step5_note))
 
@@ -394,7 +394,7 @@ class S5PagedAttention(Slide):
         row2 = table_a.add_row(3, 1)
         self.play(row2)
         arrow_a2 = arrow_map(table_a.rows[2]["mobject"][1], grid.block(3), color=ACCENT)
-        self.play(GrowArrow(arrow_a2))
+        self.play(shoot(arrow_a2))
         note5b = _step_banner("last block full → allocate logical 2 / physical 3", color=GOOD)
         self.play(FadeOut(step5_note), FadeIn(note5b))
         self.wait(0.3)
@@ -471,7 +471,7 @@ class S5PagedAttention(Slide):
         self.play(fillB4)
         arrow_b0 = arrow_map(b_block0, grid.block(2), color=ACCENT2)
         arrow_b1 = arrow_map(b_block1, grid.block(4), color=ACCENT2)
-        self.play(GrowArrow(arrow_b0), GrowArrow(arrow_b1))
+        self.play(shoot(arrow_b0), shoot(arrow_b1))
         free_cap = caption("Blocks 0, 5, 6 still free for anyone — interleaved, not adjacent")
         free_cap.next_to(b_stack, DOWN, buff=0.15)
         self.play(FadeIn(free_cap))
@@ -486,7 +486,7 @@ class S5PagedAttention(Slide):
 
         done_mark = Circle(radius=0.22, color=GOOD, fill_opacity=0.2, stroke_width=3)
         done_mark.move_to(logical_stack.get_corner(UP + LEFT) + LEFT * 0.35)
-        done_txt = Text("done", font_size=TINY_SIZE, color=GOOD)
+        done_txt = text("done", font_size=TINY_SIZE, color=GOOD)
         done_txt.move_to(done_mark.get_center())
         self.play(FadeIn(done_mark), FadeIn(done_txt))
 
@@ -522,7 +522,7 @@ class S5PagedAttention(Slide):
         )
         recap_lines.arrange(DOWN, buff=0.35, aligned_edge=LEFT)
 
-        stat = Text("96.3%", font_size=64, color=GOOD, weight="BOLD")
+        stat = text("96.3%", font_size=64, color=GOOD, weight="BOLD")
         stat_cap = caption("of KV cache memory is real token state")
         stat_group = VGroup(stat, stat_cap)
         stat_group.arrange(DOWN, buff=0.2)

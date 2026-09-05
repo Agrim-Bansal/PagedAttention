@@ -46,9 +46,14 @@
    copy-on-write + reference counts, all three sharing cases (parallel sampling, beam
    search, shared prefix), and eviction recovery (swap-to-CPU vs recompute) each get
    real coverage. (Earlier suggestion to trim the system/back half was rejected.)
-9. **Q/K/V at intuition level but WITH a visual of the actual computation.** Enough to
-   understand what K and V *are*, since the KV cache depends on it — but no
-   softmax/scaling math required.
+9. **Q/K/V with the paper’s math (Eqs. 1–3), shown as a transformer box.** The
+   persistent S1 visual is an opaque centered transformer: sequence in, a new token
+   out, joins, recenters, repeats. Open the box and introduce Eq. 2 **one vector at
+   a time** (Key, then Value, then Query) so someone who has never heard
+   “transformer” can follow; then softmax attention (Eq. 3, including
+   `q^T k / sqrt(d)`). Close it for the growing-KV loop and for prefill vs decode.
+   Still no Eq. 4 / multi-head / FFN — those are not load-bearing for PagedAttention.
+   “KV cache” as a named object stays in S3.
 10. **[A] Recurring concrete example.** Thread the paper's *"Four score and seven years
     ago our fathers…"* tokens through S3 → S4 → S5. The paper itself reuses it across
     Fig 3/6/7, so it ties the KV-cache, problem, and mechanism scenes together on
@@ -64,6 +69,23 @@
 13. **Defaults kept without extra ceremony:** a cost hook in S0 (LLM request ~10× a
     keyword search; >30% of GPU memory is mostly-wasted KV cache) and a discussion
     prompt to close S11 ("what else could you page?" → prefix caching, LoRA adapters).
+14. **S2 is a front-loadable GPU/VRAM primer, not a recap of generation.** Depth:
+    sequential-vs-parallel cores, separate CPU DRAM vs GPU VRAM (PCIe is slow),
+    weights persist (~26 GB of 40 GB), one request underuses the machine, batching
+    as **one hub on W**, leftover VRAM = max batch = throughput. No transformer /
+    attention / decode / KV. Written to sit before transformers; file order not
+    shuffled in that pass. (The old 3-minute “same math, then VRAM bar” sketch was
+    too thin.)
+15. **S3 is a deep stitch scene, not a 4-minute name-and-size dump.** S1 lands
+    "the growing K/V bundle sits in memory"; S2 lands "leftover VRAM is the
+    budget." S3 names that bundle, shows recompute vs cache on the same
+    tokens, prefill-write / decode-append, read-all/write-one, ×40 layers,
+    factor-by-factor 800 KB, then unknown length → reserve the 2048-slot max
+    (unused tail cut off from other requests) → 1.6 GB spoken for, Fig 1 left,
+    and ~7 max-length requests in 12 GB — then earns S4's allocation question
+    (including that K/V is position-dependent, not a dictionary of words).
+    Still no Eq. 4, paging, named fragmentation, or Fig 1-right. Target
+    ~9–11 min / 10–12 beats.
 
 ## Explicitly rejected / deferred
 

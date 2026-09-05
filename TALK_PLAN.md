@@ -68,9 +68,9 @@ PagedAttention/
     theme.py             # palette, fonts, sizes, act-checkpoint helper
     components.py        # reusable mobjects (below)
     s0_title.py          # ACT I — cost hook + roadmap
-    s1_transformers.py   # attention + autoregressive generation, Q/K/V intuition + computation visual
+    s1_transformers.py   # transformer-as-box loop; Eqs. 1–3; prefill vs decode; land on “need all K/V”
     s2_gpu.py            # why GPUs are useful here + limited VRAM
-    s3_kvcache.py        # KV cache: what/why, grows per token, memory budget (Fig 1-left) — intro "Four score…"
+    s3_kvcache.py        # stitch S1+S2: name the KV cache, size it, put it in leftover VRAM (Fig 1-left)
     s4_problem.py        # interactive derive; fragmentation (Fig 3, Fig 2); "no paging before LLMs"; no sharing
     s5_pagedattention.py # ACT II — blocks, block table, non-contig kernel (Fig 5), decode walkthrough (Fig 6), two-req (Fig 7)
     s6_os_and_why_hard.py# reveal OS-paging analogy AFTER; then why non-trivial / differs from OS & CPU/GPU (ties to Fig 18a)
@@ -116,7 +116,9 @@ than 8 disconnected plots.
 
 - `TokenBox` / `token_sequence([...])` — words/tokens as rounded boxes (drives the
   recurring "Four score…" example).
-- `attention_diagram(...)` — Q/K/V computation visual (S1, reused in Fig 5).
+- `attention_diagram(...)` — Q/K/V computation visual (scratch / optional overlay).
+- `TransformerBox` / `TransformerLoop` — S1 spine: opaque transformer, sequence+KV in,
+  new token out, append-and-recenter.
 - `KVBlock(slots, filled)` — fixed-size KV block (the "page").
 - `MemoryBar` / `MemoryPie` — VRAM budget + waste breakdown (Fig 1/2/3).
 - `BlockTable(rows)` + `PhysicalMemGrid(cols)` — logical→physical mapping (Fig 6/7/8).
@@ -133,19 +135,47 @@ than 8 disconnected plots.
 ~10× a keyword search, and >30% of that expensive GPU memory is KV cache — mostly
 *wasted*. Roadmap = the three acts.
 
-**S1 Transformers & attention (~4–5m).** Autoregressive generation, one token at a
-time, each token attends to all previous. **Q/K/V at intuition level with a visual of
-the computation**. Land: *to produce the next token you need the K and V of every
-previous token.*
+**S1 Transformers & attention (~6m).** Persistent visual: a centered **transformer
+box** (opaque, not literal black). Start closed: words go in, one next word comes
+out, joins, recenters. **Eq. 1** after that first loop. Then open the box and
+introduce **Eq. 2 one vector at a time** — Key (label / what the token contains),
+Value (payload / what you mix in), Query (the question this step asks; only the
+newest token). **Eq. 3**: scores `q^T k / sqrt(d)`, softmax, weighted sum of V.
+Close it and run another iteration so the K/V bundle visibly grows and nothing is
+discarded. **Prefill vs decode** (paper §2: prompt in parallel / compute-bound vs
+one-token loop / memory-bound). Land: *to produce the next token the box must be
+handed the K and V of every previous token* — that bundle sits in memory between
+iterations. Do not name “KV cache” (S3) or Eq. 4 (S5).
 
-**S2 Why GPUs (~3m).** Huge amounts of the same math → GPUs do massively parallel
-math; **batching** amortizes weights. The catch: a GPU has its **own limited VRAM**;
-everything lives there.
+**S2 Why GPUs (front-loadable primer; 8 beats).** Written to sit **before**
+transformers (scene file order unchanged this pass). No transformer box, attention,
+decode/prefill, or KV cache. Neural-net serving is the same giant matrix multiply
+against a shared `W`, over and over — the shape a GPU is built for. **CPU vs GPU**
+as sequential vs parallel cores. A GPU has its **own VRAM** (not CPU RAM; PCIe is a
+slow bridge); cores can only multiply data already there. Model weights **persist**
+in VRAM: OPT-13B ≈ 26 GB on an A100 40 GB (~65% gone before any request). One
+request is a tiny amount of math against that W, so cores wait on memory. **Batching**
+runs many requests through **one hub** on the same W (one load). Leftover VRAM is the
+serving budget: it decides the max batch, which decides throughput. Two VRAM regions
+only (weights | leftover); later scenes split leftover.
 
-**S3 KV cache (~4m).** Recomputing past K/V each step is wasteful → **cache them**.
-Grows one block/token; different per request; lives in VRAM. **Memory budget
-(Fig 1 left)**. Introduce the recurring **"Four score…"** sequence here. Point: KV
-size ⇒ how many requests fit ⇒ throughput.
+**S3 KV cache (~9–11m, stitch S1+S2).** Persistent transformer loop on
+**"Four score…"**. Pickup: the growing K/V bundle still sits in memory, and
+leftover VRAM is where it lives. **Recompute** is a triangle of real
+`W_K x` / `W_V x` work on those tokens → **keep them, name the KV cache**;
+Query is computed fresh and discarded. **Prefill writes** the prompt's pairs
+in one pass; **decode appends** one pair per step. **Read-all / write-one**
+is why decode is memory-bound. **×40 layers** makes one token expensive;
+build **800 KB / token** factor by factor. **Unknown length:** the cache
+grows until EOS, so the only number we can bank on is the model's 2048-token
+maximum — the whole strip is reserved up front; the unused tail is cut off
+from other requests. That reservation **is** 1.6 GB / request (OPT-13B).
+Two requests, independent caches, placed in leftover VRAM. **Fig 1 left**
+(65% weights / >30% KV / other) plus Table 1 packing: 12 GB ÷ 1.6 GB ≈
+**7 requests at max length**. Land on the reserved-max problem plus
+position-dependent K/V, then the S4 question: *how do you allocate memory
+for something whose final size is unknown?* No named fragmentation, blocks,
+paging, or Fig 1-right.
 
 **S4 The problem, derived by the audience (~6–7m).** Interactive: *how do you allocate
 memory for something whose final size is unknown?* Pause for answers → reveal the

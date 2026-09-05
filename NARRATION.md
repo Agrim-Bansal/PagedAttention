@@ -7,9 +7,9 @@ Auto-generated from the `NARRATION` section of each scene's module docstring in 
 ### Act I: Why memory is the bottleneck
 
 - [S0 S0Title (~1-2 min)](#s0-s0title)
-- [S1 S1Transformers (~4-5 min)](#s1-s1transformers)
-- [S2 S2GPU (~3 min)](#s2-s2gpu)
-- [S3 S3KVCache (~4 min)](#s3-s3kvcache)
+- [S1 S1Transformers (~6 min)](#s1-s1transformers)
+- [S2 S2GPU (~6 min)](#s2-s2gpu)
+- [S3 S3KVCache (~9-11 min)](#s3-s3kvcache)
 - [S4 S4Problem (~6-7 min)](#s4-s4problem)
 
 ### Act II: PagedAttention
@@ -40,9 +40,11 @@ many-billion-parameter network, one step per output token. That gap is why servi
 efficiency matters. [PAUSE]
 
 Beat 3 — The memory hook
-A big chunk of that cost is memory, not compute. On a GPU serving a large model, over 30%
-of GPU memory goes to the "KV cache" — we'll build that up shortly. The catch: existing
-systems only put 20 to 40% of it to use — that waste is this paper's target.
+Look at the two resources. The GPU still has compute to spare — cores sitting idle.
+Memory is packed: there is no room to batch more requests. That 10x cost is memory,
+not math. [PAUSE] And the kicker: over 30% of GPU memory is the KV cache, which we'll
+build up shortly. Existing systems only put 20 to 40% of it to use — that waste is
+this paper's target.
 
 Beat 4 — Roadmap
 Here's the shape of the talk, in three acts. Act I: why memory — not compute — is the
@@ -50,145 +52,208 @@ real bottleneck. Act II: the paper's core idea — chop the KV cache into small 
 blocks and manage them on demand. Act III: the payoffs — the actual speedups and sharing
 tricks. Let's start with the bottleneck.
 
-## S1 S1Transformers (~4-5 min)
+## S1 S1Transformers (~6 min)
 
-Beat 1 — Autoregressive generation
-Here's how an LLM actually produces text: it does not write a whole sentence at once.
-It looks at everything so far, predicts a single next token, appends that token to the
-sequence, and repeats. Prompt in, one token out, append, repeat — that loop is the
-entire generation process. Watch it run twice: from "Four score and seven" it produces
-"years", then from "Four score and seven years" it produces "ago". [PAUSE] Notice: every
-step re-reads the whole sequence so far.
+Beat 1 — One word at a time
+You do not need the word "transformer" yet. A language model does not write a
+sentence in one go. It takes the words so far, runs them through a box, and the
+box emits one next word. That word is appended, the sequence recenters, and the
+loop runs again. Watch "Four score and seven" produce "years". [PAUSE] In the
+paper that loop is Equation 1: the joint probability of a sentence is just the
+product of these next-word guesses.
 
-Beat 2 — Q, K, V intuition
-To decide what comes next, the model turns every token into three vectors. A Query:
-"what am I looking for right now?" A Key: "what do I contain, that others might look
-for?" And a Value: "what I'll actually contribute if someone attends to me." Only the
-newest token needs a fresh Query; every token — old and new — carries a Key and a
-Value.
+Beat 2 — Key: a label for each token
+Open the box. Each token is first a vector x_i — a list of numbers that stands
+for that word in this layer. A learned matrix W_K multiplies it: k_i equals
+W_K x_i. That is the Key. Think of it as a label on the token: what this word
+contains, and how later steps will find it. Every token gets one. [PAUSE]
 
-Beat 3 — Query meets every Key
-The newest token's Query gets compared against the Key of every token in the sequence,
-including its own. Each comparison produces one number, a raw "score" — query dot key —
-that says roughly how relevant that earlier token is to what we're looking for right
-now. [PAUSE] Which earlier token do you think gets the highest score here?
+Beat 3 — Value: what the token will add
+A second matrix produces the Value: v_i equals W_V x_i. If a later step decides
+this token matters, it is the Value that actually gets mixed into the output —
+the payload, not the label. Key is how you find it; Value is what you take.
+Every token now carries both. [PAUSE]
 
-Beat 4 — Softmax turns scores into weights
-Those raw scores get squashed by softmax into weights that are all positive and sum to
-one — a probability distribution over "how much attention to pay to each earlier
-token." Bigger score, bigger slice of attention.
+Beat 4 — Query: the question this step asks
+A third vector, only for the token we are writing from. q_i equals W_Q x_i —
+the Query. It is the question this step is asking: what should I look up to
+choose the next word? Only the newest token needs a fresh Query. Every earlier
+token just sits there with its Key and Value. [PAUSE]
 
-Beat 5 — Weighted sum → output → next token
-Now take every token's Value vector, scale it by its attention weight, and add them all
-up. That weighted sum of values is the output of this step, and it's what the model
-turns into the next predicted token. Here, that's "years" — which gets appended right
-back onto the sequence.
+Beat 5 — Query against every Key
+Equation 3 starts with a score. The Query is compared to every Key from position
+1 through i — including its own, never a future token. s_j equals q_i transpose
+k_j over square root of d. The numbers here are illustrative. [PAUSE] Which
+token do you think scores highest?
 
-Beat 6 — One step later: the stacks grow
-Run the loop again to produce "ago": the sequence is now one token longer, so there's
-one more Key and one more Value in play than last time. Every single generation step
-adds exactly one new K and one new V — and none of the old ones ever get thrown away,
-because the next step still needs to compare against them too.
+Beat 6 — Softmax: scores become weights
+Those scores become attention weights by softmax: a_ij equals exp of the score,
+divided by the sum of those exps from t equals 1 to i. The weights are positive
+and they sum to one. Bigger score, bigger slice of attention — a budget to spend
+across the tokens so far.
 
-Beat 7 — The landing point
-So here's the load-bearing fact for the rest of this talk: to produce the very next
-token, you need the Key and the Value of every previous token, not just the most recent
-one. That K/V state has to sit somewhere and stick around for the entire request. Keep
-an eye on those colored stacks — that's exactly what we'll come back to.
+Beat 7 — Mix the Values, write the next word
+Spend that budget on Values: o_i equals the sum from j equals 1 to i of a_ij
+v_j. That mixture is what the box turns into the next word. Here that's "ago",
+which exits, joins the sequence, and recenters. Close the box — same machine as
+beat 1, we just know what's inside.
 
-## S2 S2GPU (~3 min)
+Beat 8 — Nothing is thrown away
+Run the loop once more, box closed. Every old Key and Value stays on the input;
+the new token arrives with one new pair; nothing is thrown away. Next iteration
+the box will consume the full sequence and every previous K and V again.
+
+Beat 9 — Prefill vs decode
+Serving splits this into two phases. Prefill: the whole prompt enters at once,
+in parallel, and the box writes K and V for every prompt token plus the first
+output token — compute-bound. Decode: the loop we have been watching — one new
+token per pass, re-reading the growing K/V bundle every time — memory-bound, and
+that is the phase that dominates latency.
+
+Beat 10 — The landing point
+So the load-bearing fact: to emit the next token, the box must be handed the Key
+and the Value of every previous token, not just the most recent one. That growing
+bundle sits in memory between iterations — at every layer, every decode step, for
+the entire request. That is the state the rest of this talk is about.
+
+## S2 S2GPU (~6 min)
 
 ---------
-Beat 1 — Same math, everywhere.
-Every decoding step we just saw is, under the hood, the same handful of
-matrix multiplies applied over and over: one token in, one token's worth of
-math against every weight matrix in the model. Now imagine that happening
-for every layer, and — once we start batching requests — for many tokens at
-once. It's not complicated math. It's just an enormous amount of *identical*
-math, fanned out over and over. [PAUSE] That "same operation, many times"
-shape is exactly what a GPU is built for.
+Beat 1 — Same math, over and over.
+Neural-net serving is not fancy one-off logic. Under the hood it is the same
+matrix multiply, again and again, against a huge shared weight matrix W.
+One small input, one giant W, one small output — and that pattern repeats
+across the whole model. [PAUSE] That "same operation, many times" shape is
+exactly what a GPU is built for.
 
 Beat 2 — CPU vs GPU.
-A CPU has a handful of big, fast cores — great at doing one complicated
-thing quickly, one after another. A GPU flips that trade: thousands of
-small, simple cores. Give it one huge matrix multiply and it slices the
-work into thousands of tiny pieces and runs them all at the same time, one
-piece per core. Our "do the same multiply-and-add for every token" workload
-maps almost perfectly onto that grid of cores. [PAUSE]
+A CPU has a handful of big, fast cores. Great at one complicated thing at a
+time. Watch them light up in sequence. A GPU flips the trade: thousands of
+small, simple cores. Give it a pile of identical multiplies and it runs them
+all at once, one piece per core. [PAUSE] Our workload — the same multiply,
+many times — maps almost perfectly onto that grid.
 
-Beat 3 — Batching amortizes the weights.
-Here's the trick that makes serving efficient: the model's weights are
-identical for every request — request 1, request 2, request N all multiply
-against the exact same matrices. So instead of loading those weights once
-per request, we load them once and run many requests' tokens through them
-in the same pass. Throughput becomes a question of how many requests we can
-batch together into one pass over the same weights. More batching, more
-throughput — for free, almost.
+Beat 3 — Two memory pools.
+Here is the catch that matters for serving. The GPU does not borrow the
+computer's regular RAM. It has its own memory, called VRAM, sitting next to
+the cores. CPU DRAM and GPU VRAM are two separate pools, joined by a PCIe
+link that is slow compared to on-device memory. Cores can only multiply data
+that is already in VRAM. If it is still on the CPU side, the GPU is waiting.
 
-Beat 4 — The catch: VRAM is limited.
-Almost for free. Here's the catch: the GPU doesn't borrow the computer's
-regular memory — it has its own memory, called VRAM, and it's finite. An
-A100 GPU, for example, has 40GB of it. Anything the model touches while it
-runs — the weights, the intermediate activations, and any per-request state
-we want to keep around — has to fit inside that 40GB. The weights alone for
-a 13-billion-parameter model like OPT-13B are about 26GB. That's already
-almost two-thirds of an A100's memory, gone, before we've served a single
-request. [PAUSE]
+Beat 4 — Weights persist in VRAM.
+So the model's weights have to live in VRAM for the whole time we are
+serving. For OPT-13B on an A100, that is about 26 gigabytes of a 40-gigabyte
+card. Sixty-five percent of the GPU's memory is gone the moment the model
+loads — before we have served a single request. [PAUSE] Those weights stay
+there. They do not come and go per request.
 
-Beat 5 — Landing.
-So: weights take a big, fixed bite out of VRAM the moment the model loads.
-Whatever is left over is what we have to work with for everything else —
-and that leftover space is what decides how many requests we can actually
-batch together at once.
+Beat 5 — One request vs 26 GB.
+Now send in one request. The cores have to stream that whole 26 GB of
+weights to produce one small result. Most of the time they are waiting on
+memory, not multiplying. A single request is a tiny amount of math against a
+huge W, so the machine looks idle even though VRAM is already packed.
+Serving one-at-a-time wastes the GPU.
 
-## S3 S3KVCache (~4 min)
+Beat 6 — Batching: one hub, many requests.
+The fix is batching. The weights are identical for every request, so we load
+W once and send many requests through the same multiply. Watch: every
+request arrow ends at one point on W, and every result arrow starts from
+that same point. One pass over the weights, N results. [PAUSE] Throughput
+becomes a question of how many requests we can pack into that one pass.
+
+Beat 7 — Leftover VRAM is the budget.
+Almost for free — except leftover VRAM is finite. Weights already took
+26 GB. The empty slice at the top is all we have for live request state.
+Some requests fit; the rest bounce off. We cannot batch more than that
+leftover space can hold. [PAUSE]
+
+Beat 8 — Landing.
+So: leftover VRAM decides the maximum batch, and the maximum batch decides
+throughput. That is the resource this talk is about. Everything that follows
+is about how we spend that leftover slice.
+
+## S3 S3KVCache (~9-11 min)
 
 ---------
-Beat 1 — Recomputing is wasteful.
-Remember: to generate the next token, the model needs the key and value
-vectors of every token that came before it. The naive way to get those is
-to just recompute them — at every single decoding step, run every previous
-token back through the model to rebuild its K and V. Step 2 recomputes
-token 1's K/V. Step 3 recomputes tokens 1 and 2's. Step 10 recomputes nine
-tokens' worth, all over again, just to add one new token. [PAUSE] That
-triangle of repeated work only grows as the sequence gets longer.
+Beat 1 — Pickup.
+Last scene, leftover VRAM was the serving budget. The scene before that, the
+box needed the Key and Value of every previous token to write the next word.
+That bundle is still sitting here — watch the Query on "years" look across
+every Key. We are going to name this bundle, size it, and put it in that
+leftover slice. [PAUSE]
 
-Beat 2 — Cache them instead.
-So don't recompute — cache them. The first time we compute a token's K and
-V, we keep them around, and every later step just reads them back and adds
-one new pair for the newest token. This is "the KV cache": for a given
-request, one row that grows by exactly one K,V pair per generated token.
-Back to our example — "Four score and seven years ago our
-fathers" — each token box with its cached K (blue) and V (purple) sitting
-right beneath it.
+Beat 2 — Recompute is a triangle of real work.
+Suppose we throw the Keys and Values away after each step. To write the next
+word, we would rebuild them: k equals W_K x, v equals W_V x, for every
+previous token, every time. Step 2 rebuilds token 1. Step 3 rebuilds 1 and 2.
+Step 5 rebuilds four tokens just to add one new pair. [PAUSE] That triangle
+only grows. The sentence gets longer; the wasted multiply gets worse.
 
-Beat 3 — Per request, and it lives in VRAM.
-Every request gets its own cache — it's a per-request structure, not
-shared. Two requests running at once means two separate caches, growing
-independently, side by side. And remember where all of this has to live:
-in the GPU's own limited VRAM, right alongside the model's weights.
+Beat 3 — Keep them: the KV cache.
+So don't throw them away. The first time we compute a token's Key and Value,
+we write them down and keep them. The next step reads that store and computes
+only the new pair. Query is different: it is made fresh for the newest token
+and discarded — only K and V persist. This store is the KV cache.
 
-Beat 4 — It's surprisingly big.
-Here's the number that makes this matter: for OPT-13B, one token's K and V
-together cost about 800 kilobytes. That comes from 2 — one for K, one for V
-— times 5120, the hidden size, times 40 layers, times 2 bytes per value in
-FP16. [PAUSE] Multiply that out over a full 2048-token request and you get
-roughly 1.6 gigabytes — for a single request's cache.
+Beat 4 — Prefill writes; decode appends.
+Serving fills that cache in two phases. Prefill: the whole prompt enters at
+once, in parallel, and the box writes a K,V pair for every prompt token in
+one pass. Decode: the loop we have been watching — one new pair appended per
+step. The cache is the state that survives between those decode steps.
 
-Beat 5 — The memory budget.
-Put it on the same picture as the weights: on a 13-billion-parameter model
-serving on an A100's 40GB, about 65% of that memory is the model's
-parameters, more than 30% is KV cache, and a small remainder is other,
-short-lived activation memory. Weights are fixed the moment the model
-loads. KV cache is the only part of this picture that grows and shrinks
-while we're serving.
+Beat 5 — Read all, write one.
+Look at one decode step closely. To write the next word, the cores must read
+every cached pair — the whole row — and then write exactly one new pair on
+the end. Read all, write one. That is why decode is memory-bound, and why
+this object will eat leftover VRAM as the sentence grows.
 
-Beat 6 — Landing: KV cache decides batch size.
-That flexible region — the KV cache slice of the budget — is the one part
-we get to spend. How many requests' KV caches we can fit into it is exactly
-how many requests we can batch together, which is exactly our throughput.
-[PAUSE] So the question becomes: how do we actually lay all of these
-per-request, growing caches out in that memory?
+Beat 6 — Every layer has its own copy.
+And it is not one row. The model has many layers — forty, for OPT-13B — and
+each layer keeps its own Keys and Values for every token. What looks like a
+single strip is forty copies stacked. That is the first reason one token is
+expensive.
+
+Beat 7 — 800 KB, built in public.
+Here is the arithmetic, one factor at a time. One vector is 5120 numbers in
+FP16 — two bytes each — about 10 kilobytes. Times two, because each token
+stores a Key and a Value: about 20 kilobytes. Times forty layers: 800
+kilobytes per token. That is the cost of one word. [PAUSE] How many words
+does this request need?
+
+Beat 8 — Unknown length, so reserve the max.
+We do not know. The cache grows one token at a time until the model emits
+stop — there is no content-length. The only number we can bank on is the
+model's maximum, 2048. So the whole strip gets reserved up front. The tokens
+we have actually written sit on the left. Everything past them is reserved
+and cut off from every other request, whether we ever fill it or not. [PAUSE]
+
+Beat 9 — That reserved strip is 1.6 GB.
+Now the last multiply means something. 800 kilobytes times 2048 reserved
+slots is about 1.6 gigabytes — not "how big this request is," but how much
+VRAM one request has spoken for. Used or not, that whole strip is gone from
+the leftover budget. [PAUSE]
+
+Beat 10 — Per request, in leftover VRAM.
+Every request owns its own reserved strip. Request A is "Four score…";
+request B is "it was the best…" — they grow independently, different lengths,
+not shared. Both of them have to live in leftover VRAM, beside the 26
+gigabytes of weights that never move.
+
+Beat 11 — Fig 1 left, and how many fit.
+That leftover slice is the paper's Figure 1: on a 13B model and an A100
+40-gigabyte card, about 65 percent is weights, more than 30 percent is KV
+cache — 12 gigabytes — and a sliver is other, short-lived activations.
+Weights are fixed. KV is the only region that grows and shrinks. 12 gigabytes
+divided by 1.6 gigabytes reserved is about seven requests at maximum length.
+An eighth does not fit.
+
+Beat 12 — Two hard properties.
+Two facts make this object awkward to place. First: we reserved the max
+because the length was unknown — most of that strip may never fill. Second:
+the same word at a different position has a different Key and Value — this
+is a timeline, not a dictionary of words. Leftover VRAM is spent on these
+growing rows; how we lay them out is the batch size. [PAUSE] So: how do you
+allocate memory for something whose final size is unknown?
 
 ## S4 S4Problem (~6-7 min)
 

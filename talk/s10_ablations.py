@@ -34,10 +34,8 @@ from manim import (
     RIGHT,
     UP,
     ORIGIN,
-    Arrow,
     FadeIn,
     FadeOut,
-    Text,
     VGroup,
 )
 from manim_slides import Slide
@@ -108,7 +106,7 @@ class S10Ablations(Slide):
         # size) positions (evenly spaced, since sizes are powers of two) and
         # swap in the true block-size numbers as the tick text afterward.
         for lbl, bs in zip(line.x_labels, block_sizes):
-            real_lbl = Text(str(bs), font_size=TINY_SIZE, color=MUTED)
+            real_lbl = text(str(bs), font_size=TINY_SIZE, color=MUTED)
             real_lbl.move_to(lbl)
             lbl.become(real_lbl)
 
@@ -118,14 +116,13 @@ class S10Ablations(Slide):
 
         self.play(line.animate_in(), FadeIn(x_axis_caption2))
 
-        default_arrow = Arrow(
+        default_arrow = arrow(
             line.axes.c2p(4, 12.5), line.axes.c2p(4, 2.5),
-            buff=0.1, stroke_width=2.5, color=WARN,
-            max_tip_length_to_length_ratio=0.15,
+            buff=0.1, color=WARN,
         )
         default_label = small("vLLM default: 16", font_size=SMALL_SIZE, color=WARN)
         default_label.next_to(default_arrow, UP, buff=0.15)
-        self.play(FadeIn(default_arrow), FadeIn(default_label))
+        self.play(shoot(default_arrow), FadeIn(default_label))
         self.wait(0.3)
         self.next_slide()
         self.play(

@@ -70,11 +70,9 @@ from manim import (
     RIGHT,
     UP,
     UR,
-    Arrow,
     Cross,
     FadeIn,
     FadeOut,
-    GrowFromEdge,
     Line,
     Rectangle,
     Transform,
@@ -121,7 +119,7 @@ class S7Sharing(Slide):
         arrow_a1 = arrow_map(prompt_group, a1_box, color=ACCENT)
         arrow_a2 = arrow_map(prompt_group, a2_box, color=ACCENT2)
         self.play(FadeIn(a1_box), FadeIn(a2_box))
-        self.play(GrowFromEdge(arrow_a1, UP), GrowFromEdge(arrow_a2, UP))
+        self.play(shoot(arrow_a1), shoot(arrow_a2))
         note1 = caption("Same prompt, different sampled continuations")
         note1.next_to(VGroup(a1_box, a2_box), DOWN, buff=0.6)
         self.play(FadeIn(note1))
@@ -168,12 +166,12 @@ class S7Sharing(Slide):
         self.play(a1_table.set_row(0, 0, 4), a1_table.set_row(1, 1, 3))
         self.play(a2_table.set_row(0, 0, 4), a2_table.set_row(1, 1, 3))
 
-        arrow_1a = Arrow(a1_table.get_right(), phys0.cells.get_left(), color=ACCENT, buff=0.15, stroke_width=2.5)
-        arrow_1b = Arrow(a1_table.get_right(), phys1.cells.get_left(), color=ACCENT, buff=0.15, stroke_width=2.5)
-        arrow_2a = Arrow(a2_table.get_left(), phys0.cells.get_right(), color=ACCENT2, buff=0.15, stroke_width=2.5)
-        arrow_2b = Arrow(a2_table.get_left(), phys1.cells.get_right(), color=ACCENT2, buff=0.15, stroke_width=2.5)
-        self.play(*[GrowFromEdge(a, LEFT) for a in (arrow_1a, arrow_1b)])
-        self.play(*[GrowFromEdge(a, RIGHT) for a in (arrow_2a, arrow_2b)])
+        arrow_1a = arrow(a1_table.get_right(), phys0.cells.get_left(), color=ACCENT, buff=0.15)
+        arrow_1b = arrow(a1_table.get_right(), phys1.cells.get_left(), color=ACCENT, buff=0.15)
+        arrow_2a = arrow(a2_table.get_left(), phys0.cells.get_right(), color=ACCENT2, buff=0.15)
+        arrow_2b = arrow(a2_table.get_left(), phys1.cells.get_right(), color=ACCENT2, buff=0.15)
+        self.play(*[shoot(a) for a in (arrow_1a, arrow_1b)])
+        self.play(*[shoot(a) for a in (arrow_2a, arrow_2b)])
 
         badge0 = _badge_at(phys0, color=ACCENT2, value=2)
         badge1 = _badge_at(phys1, color=ACCENT2, value=2)
@@ -199,14 +197,14 @@ class S7Sharing(Slide):
             cell.set_fill(ACCENT, opacity=1.0)
         new_block.move_to(phys1.get_center() + RIGHT * 3.4)
 
-        cow_arrow = Arrow(
+        cow_arrow = arrow(
             phys1.cells.get_right(), new_block.cells.get_left(),
-            color=WARN, buff=0.15, stroke_width=3,
+            color=WARN, buff=0.15,
         )
         cow_arrow_label = caption("copy")
         cow_arrow_label.next_to(cow_arrow, UP, buff=0.1)
 
-        self.play(FadeIn(new_block), GrowFromEdge(cow_arrow, LEFT), FadeIn(cow_arrow_label))
+        self.play(FadeIn(new_block), shoot(cow_arrow), FadeIn(cow_arrow_label))
         self.play(badge1.set_value(1))
         self.play(a1_table.set_row(1, 2, 4))
         cost_note = caption("Block 0 (full) stays shared forever; only block 1 (the open one) is copied")
@@ -253,14 +251,14 @@ class S7Sharing(Slide):
         branch1c = Line(beam1.get_bottom(), beam1c.get_top(), color=MUTED, stroke_width=2)
 
         self.play(FadeIn(root), FadeIn(root_badge))
-        self.play(GrowFromEdge(branch1, UP), GrowFromEdge(branch2, UP), FadeIn(beam1), FadeIn(beam2))
+        self.play(shoot(branch1), shoot(branch2), FadeIn(beam1), FadeIn(beam2))
         self.play(FadeIn(beam1_badge), FadeIn(beam2_badge))
         self.next_slide()
 
         tree_note = caption("Beams share the prompt's blocks, then fork off their own")
         tree_note.next_to(VGroup(beam1b, beam1c, beam2), DOWN, buff=0.9)
         self.play(
-            GrowFromEdge(branch1b, UP), GrowFromEdge(branch1c, UP),
+            shoot(branch1b), shoot(branch1c),
             FadeIn(beam1b), FadeIn(beam1c),
         )
         self.play(FadeIn(tree_note))
@@ -341,7 +339,7 @@ class S7Sharing(Slide):
 
         arrows6 = VGroup(*[arrow_map(prefix_block, s, color=MUTED) for s in suffixes])
         self.play(FadeIn(suffixes))
-        self.play(*[GrowFromEdge(a, UP) for a in arrows6])
+        self.play(*[shoot(a) for a in arrows6])
         suffix_note = caption("Prefix computed once and cached; only the suffix is new per request")
         suffix_note.next_to(suffixes, DOWN, buff=0.45)
         self.play(FadeIn(suffix_note))

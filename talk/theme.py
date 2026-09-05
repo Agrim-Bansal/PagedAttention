@@ -2,6 +2,12 @@
 
 Constants + small text helpers + the act_checkpoint "where we are" beat.
 No LaTeX: everything here uses `Text`.
+
+Pango (Manim `Text`) lays out glyph advances in integer pixels, so small
+`font_size` values get uneven kerning
+(https://github.com/ManimCommunity/manim/issues/2844). Importing this module
+patches `Text` to render at a large size and scale down, so every `Text(...)`
+in the deck — helpers, components, and raw scene calls — stays evenly spaced.
 """
 
 from manim import (
@@ -15,10 +21,12 @@ from manim import (
     FadeIn,
     FadeOut,
     ManimColor,
+    MarkupText,
     RoundedRectangle,
     Text,
     VGroup,
 )
+from manim.constants import DEFAULT_FONT_SIZE
 
 __all__ = [
     "BG",
@@ -40,10 +48,12 @@ __all__ = [
     "SMALL_SIZE",
     "TINY_SIZE",
     "apply_theme",
+    "text",
     "title",
     "body",
     "small",
     "caption",
+    "formula",
     "act_checkpoint",
 ]
 
@@ -67,6 +77,11 @@ BODY_SIZE = 30
 SMALL_SIZE = 22
 TINY_SIZE = 16
 
+# Pango integer-advance artifacts are obvious below ~28px. Render at Manim's
+# default (48) or the requested size, whichever is larger, then scale the
+# mobject so on-screen size is unchanged.
+_KERN_RENDER_SIZE = float(DEFAULT_FONT_SIZE)
+
 _FALLBACK_FONTS = ["Avenir Next", "Avenir", "Helvetica Neue", "Helvetica", "Arial", "Sans"]
 
 
@@ -86,38 +101,107 @@ def _resolve_font():
 _RESOLVED_FONT = _resolve_font()
 
 
+def _install_text_kerning_patch():
+    """Render Text at >= _KERN_RENDER_SIZE, then scale to the requested size.
+
+    Must wrap the real ``Text.__init__`` and also replace ``_original__init__``
+    so ``Text.set_default`` (used by ``apply_theme``) keeps the workaround.
+    """
+    if getattr(Text, "_kerning_patched", False):
+        return
+
+    _orig_init = Text.__init__
+
+    def _kerning_init(self, *args, **kwargs):
+        target = kwargs.get("font_size")
+        if target is None:
+            _orig_init(self, *args, **kwargs)
+            return
+        target = float(target)
+        render = max(target, _KERN_RENDER_SIZE)
+        kwargs["font_size"] = render
+        _orig_init(self, *args, **kwargs)
+        if render != target and self.height > 1e-8:
+            self.scale(target / render)
+
+    Text.__init__ = _kerning_init
+    Text._original__init__ = _kerning_init
+    Text._kerning_patched = True
+
+
+def _install_markup_kerning_patch():
+    """Same integer-advance workaround for MarkupText (formulas)."""
+    if getattr(MarkupText, "_kerning_patched", False):
+        return
+
+    _orig_init = MarkupText.__init__
+
+    def _kerning_init(self, *args, **kwargs):
+        target = kwargs.get("font_size")
+        if target is None:
+            _orig_init(self, *args, **kwargs)
+            return
+        target = float(target)
+        render = max(target, _KERN_RENDER_SIZE)
+        kwargs["font_size"] = render
+        _orig_init(self, *args, **kwargs)
+        if render != target and self.height > 1e-8:
+            self.scale(target / render)
+
+    MarkupText.__init__ = _kerning_init
+    MarkupText._original__init__ = _kerning_init
+    MarkupText._kerning_patched = True
+
+
+_install_text_kerning_patch()
+_install_markup_kerning_patch()
+
+
+def text(content, **kw):
+    """Text with even letter spacing. Same kwargs as Manim ``Text``."""
+    return Text(content, **kw)
+
+
 def apply_theme(scene):
     """Set the scene background and the default Text font/color."""
     scene.camera.background_color = ManimColor(BG)
     Text.set_default(font=_RESOLVED_FONT, color=FG)
 
 
-def title(text, **kw):
+def title(content, **kw):
     """Top-of-frame title."""
     kw.setdefault("font_size", TITLE_SIZE)
     kw.setdefault("color", FG)
-    t = Text(text, **kw)
+    t = text(content, **kw)
     t.to_edge(UP)
     return t
 
 
-def body(text, **kw):
+def body(content, **kw):
     """Body text, default size/color."""
     kw.setdefault("font_size", BODY_SIZE)
     kw.setdefault("color", FG)
-    return Text(text, **kw)
+    return text(content, **kw)
 
 
-def small(text, **kw):
+def small(content, **kw):
     kw.setdefault("font_size", SMALL_SIZE)
     kw.setdefault("color", FG)
-    return Text(text, **kw)
+    return text(content, **kw)
 
 
-def caption(text, **kw):
+def caption(content, **kw):
     kw.setdefault("font_size", TINY_SIZE)
     kw.setdefault("color", MUTED)
-    return Text(text, **kw)
+    return text(content, **kw)
+
+
+def formula(markup, font_size=BODY_SIZE, color=FG, **kw):
+    """Pango markup for math (sub/sup). No LaTeX."""
+    kw.setdefault("font", _RESOLVED_FONT)
+    kw.setdefault("font_size", font_size)
+    kw.setdefault("color", color)
+    return MarkupText(markup, **kw)
 
 
 def act_checkpoint(scene, act_no, act_title, done=(), current="", upcoming=()):
@@ -132,7 +216,7 @@ def act_checkpoint(scene, act_no, act_title, done=(), current="", upcoming=()):
     for i, name in enumerate(act_names):
         is_current = (i + 1) == act_no
         pill_color = ACCENT if is_current else MUTED
-        label = Text(name, font_size=BODY_SIZE, color=pill_color, weight="BOLD" if is_current else "NORMAL")
+        label = text(name, font_size=BODY_SIZE, color=pill_color, weight="BOLD" if is_current else "NORMAL")
         circle = RoundedRectangle(
             width=1.9, height=0.9, corner_radius=0.45,
             color=pill_color, fill_opacity=0.15 if is_current else 0.0,
@@ -146,18 +230,18 @@ def act_checkpoint(scene, act_no, act_title, done=(), current="", upcoming=()):
     pills.arrange(RIGHT, buff=1.2)
     pills.move_to(ORIGIN + UP * 1.6)
 
-    heading = Text(act_title, font_size=TITLE_SIZE, color=FG)
+    heading = text(act_title, font_size=TITLE_SIZE, color=FG)
     heading.next_to(pills, UP, buff=0.6)
 
     lines = VGroup()
     if done:
-        done_text = Text("Done: " + "; ".join(done), font_size=SMALL_SIZE, color=MUTED)
+        done_text = text("Done: " + "; ".join(done), font_size=SMALL_SIZE, color=MUTED)
         lines.add(done_text)
     if current:
-        current_text = Text("Now: " + current, font_size=BODY_SIZE, color=ACCENT)
+        current_text = text("Now: " + current, font_size=BODY_SIZE, color=ACCENT)
         lines.add(current_text)
     if upcoming:
-        upcoming_text = Text("Next: " + "; ".join(upcoming), font_size=SMALL_SIZE, color=MUTED)
+        upcoming_text = text("Next: " + "; ".join(upcoming), font_size=SMALL_SIZE, color=MUTED)
         lines.add(upcoming_text)
     lines.arrange(DOWN, buff=0.35, aligned_edge=LEFT)
     lines.next_to(pills, DOWN, buff=0.9)

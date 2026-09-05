@@ -92,7 +92,6 @@ from manim import (
     GrowFromEdge,
     Rectangle,
     Square,
-    Text,
     VGroup,
 )
 from manim_slides import Slide
@@ -150,7 +149,7 @@ def _kv_strip(filled_words, current_word, n_reserved, internal_width, internal_l
         stroke_color=BLOCK_STROKE,
         stroke_width=1.5,
     )
-    internal_txt = Text(internal_label, font_size=TINY_SIZE, color=FG)
+    internal_txt = text(internal_label, font_size=TINY_SIZE, color=FG)
     if internal_txt.width > internal_width * 0.9:
         internal_txt.scale_to_fit_width(internal_width * 0.9)
     internal_txt.move_to(internal_rect.get_center())
@@ -173,7 +172,7 @@ class S4Problem(Slide):
         # -------------------------------------------------------------
         # Beat 1: the question
         # -------------------------------------------------------------
-        question = Text(
+        question = text(
             "How do you allocate memory for\nsomething whose final size is unknown?",
             font_size=36,
             color=FG,
@@ -202,7 +201,7 @@ class S4Problem(Slide):
         strip_outline.move_to(ORIGIN)
         claim = Rectangle(width=12.0, height=1.0, fill_color=WARN, fill_opacity=1.0, stroke_width=0)
         claim.move_to(strip_outline.get_left(), aligned_edge=LEFT)
-        claim_label = Text("Request A — 2048 slots reserved", font_size=SMALL_SIZE, color=BG)
+        claim_label = text("Request A — 2048 slots reserved", font_size=SMALL_SIZE, color=BG)
         claim_label.move_to(strip_outline.get_center())
 
         used_caption = caption("actual need: unknown until <eos>")
@@ -245,7 +244,7 @@ class S4Problem(Slide):
         cap_current.next_to(row_a.current, DOWN, buff=0.35)
         cap_reserved = caption("reserved\n(idle)")
         cap_reserved.next_to(row_a.reserved, DOWN, buff=0.35)
-        cap_internal = Text("INTERNAL FRAGMENTATION", font_size=TINY_SIZE, color=BAD)
+        cap_internal = text("INTERNAL FRAGMENTATION", font_size=TINY_SIZE, color=BAD)
         cap_internal.next_to(row_a.internal, UP, buff=0.35)
 
         self.play(FadeIn(heading), FadeIn(legend))
@@ -264,7 +263,7 @@ class S4Problem(Slide):
         bottom_caps = VGroup(cap_filled, cap_current, cap_reserved)
         gap = Rectangle(width=row_a.width * 0.5, height=0.35, fill_color=BAD, fill_opacity=0.5, stroke_width=0)
         gap.next_to(bottom_caps, DOWN, buff=0.4).align_to(row_a, LEFT).shift(RIGHT * 1.0)
-        gap_label = Text("external fragmentation — too small for any request", font_size=TINY_SIZE, color=FG)
+        gap_label = text("external fragmentation — too small for any request", font_size=TINY_SIZE, color=FG)
         gap_label.next_to(gap, DOWN, buff=0.15)
 
         row_b = _kv_strip(
@@ -338,7 +337,7 @@ class S4Problem(Slide):
             r[1].align_to(rows[0][1], LEFT)
         rows.next_to(legend2, DOWN, buff=0.6)
 
-        vllm_q = Text("?", font_size=TITLE_SIZE, color=MUTED)
+        vllm_q = text("?", font_size=TITLE_SIZE, color=MUTED)
         vllm_q.move_to(bar_vllm.get_center())
 
         landing = body("Only 20-40% of the KV memory holds actual token state.")
@@ -375,7 +374,7 @@ class S4Problem(Slide):
         right_bar_outline = Rectangle(width=2.2, height=1.6, stroke_color=BLOCK_STROKE, stroke_width=2)
         right_bar = Rectangle(width=2.2, height=0.5, fill_color=BAD, fill_opacity=1.0, stroke_width=0)
         right_bar.move_to(right_bar_outline.get_bottom(), aligned_edge=DOWN)
-        right_q = Text("?", font_size=32, color=BAD)
+        right_q = text("?", font_size=32, color=BAD)
         right_q.next_to(right_bar_outline, UP, buff=0.15)
         right_visual = VGroup(right_bar_outline, right_bar, right_q)
         right_shape = caption("length grows one token at a time,\nper request")
@@ -424,7 +423,7 @@ class S4Problem(Slide):
             stroke_width=3,
         )
         highlight.move_to(copies.get_center())
-        dup_label = Text("same content, stored twice", font_size=SMALL_SIZE, color=BAD)
+        dup_label = text("same content, stored twice", font_size=SMALL_SIZE, color=BAD)
         dup_label.next_to(highlight, DOWN, buff=0.3)
 
         self.play(FadeIn(heading), FadeIn(sub))

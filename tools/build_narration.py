@@ -16,9 +16,9 @@ OUT_PATH = ROOT / "NARRATION.md"
 # (file stem, class name, act, target minutes) — from talk/CONTRACT.md's scene table.
 SCENES = [
     ("s0_title", "S0Title", "I", "1-2"),
-    ("s1_transformers", "S1Transformers", "I", "4-5"),
-    ("s2_gpu", "S2GPU", "I", "3"),
-    ("s3_kvcache", "S3KVCache", "I", "4"),
+    ("s1_transformers", "S1Transformers", "I", "6"),
+    ("s2_gpu", "S2GPU", "I", "6"),
+    ("s3_kvcache", "S3KVCache", "I", "9-11"),
     ("s4_problem", "S4Problem", "I", "6-7"),
     ("s5_pagedattention", "S5PagedAttention", "II", "7-8"),
     ("s6_os_and_why_hard", "S6OSAndWhyHard", "II", "4-5"),

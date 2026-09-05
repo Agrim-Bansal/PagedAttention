@@ -17,6 +17,7 @@ env/
 media/
 slides/
 dist/
+tmp_qa/
 
 # Local QA output
 qa/

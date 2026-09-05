@@ -68,10 +68,8 @@ from manim import (
     RIGHT,
     UP,
     AnimationGroup,
-    Arrow,
     FadeIn,
     FadeOut,
-    GrowFromEdge,
     Rectangle,
     Transform,
     VGroup,
@@ -136,7 +134,7 @@ class S6OSAndWhyHard(Slide):
 
         arrow1 = arrow_map(logical_group, table, color=MUTED)
         arrow2 = arrow_map(table, physical, color=MUTED)
-        self.play(GrowFromEdge(arrow1, LEFT), GrowFromEdge(arrow2, LEFT))
+        self.play(shoot(arrow1), shoot(arrow2))
         self.wait(0.3)
         self.next_slide()
 
@@ -279,18 +277,17 @@ class S6OSAndWhyHard(Slide):
         kernel_caption.next_to(stages, UP, buff=0.35)
 
         stage_arrows = VGroup(*[
-            Arrow(
+            arrow(
                 stages[i].get_right(), stages[i + 1].get_left(),
-                color=MUTED, buff=0.1, stroke_width=2.5,
-                max_tip_length_to_length_ratio=0.35,
+                buff=0.1,
             )
             for i in range(len(stages) - 1)
         ])
 
         self.play(FadeIn(kernel_caption))
         self.play(FadeIn(stages[0]))
-        self.play(GrowFromEdge(stage_arrows[0], LEFT), FadeIn(stages[1]))
-        self.play(GrowFromEdge(stage_arrows[1], LEFT), FadeIn(stages[2]))
+        self.play(shoot(stage_arrows[0]), FadeIn(stages[1]))
+        self.play(shoot(stage_arrows[1]), FadeIn(stages[2]))
         self.wait(0.3)
         self.next_slide()
         self.play(

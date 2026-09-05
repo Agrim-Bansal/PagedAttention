@@ -80,12 +80,9 @@ from manim import (
     Cross,
     FadeIn,
     FadeOut,
-    GrowArrow,
-    GrowFromEdge,
     Rectangle,
     RoundedRectangle,
     Square,
-    Text,
     VGroup,
 )
 from manim_slides import Slide
@@ -100,7 +97,7 @@ def _box(label, width=2.4, height=0.9, fill=BLOCK_FILL, stroke=BLOCK_STROKE, tex
         corner_radius=0.1, width=width, height=height,
         fill_color=fill, fill_opacity=1.0, stroke_color=stroke, stroke_width=2,
     )
-    t = Text(label, font_size=font_size, color=text_color)
+    t = text(label, font_size=font_size, color=text_color)
     if t.width > width * 0.9:
         t.scale_to_fit_width(width * 0.9)
     t.move_to(b.get_center())
@@ -136,11 +133,11 @@ class S8Scheduling(Slide):
         kv_gpu_arrow = arrow_map(kv_mgr, gpu_alloc, color=MUTED)
 
         self.play(
-            FadeIn(kv_mgr), GrowArrow(sched_kv_arrow),
+            FadeIn(kv_mgr), shoot(sched_kv_arrow),
         )
         self.play(
             FadeIn(cpu_alloc), FadeIn(gpu_alloc),
-            GrowArrow(kv_cpu_arrow), GrowArrow(kv_gpu_arrow),
+            shoot(kv_cpu_arrow), shoot(kv_gpu_arrow),
         )
 
         worker_names = ["Worker 0", "Worker 1", "...", "Worker N-1"]
@@ -149,7 +146,7 @@ class S8Scheduling(Slide):
         worker_arrows = VGroup()
         for name, x in zip(worker_names, worker_xs):
             if name == "...":
-                dots = Text("...", font_size=BODY_SIZE, color=MUTED)
+                dots = text("...", font_size=BODY_SIZE, color=MUTED)
                 dots.move_to(RIGHT * x + UP * 0.3)
                 workers.add(dots)
                 continue
@@ -158,7 +155,7 @@ class S8Scheduling(Slide):
                 fill_color=BLOCK_FILL, fill_opacity=1.0, stroke_color=ACCENT2, stroke_width=2,
             )
             outer.move_to(RIGHT * x + UP * 0.3)
-            wname = Text(name, font_size=TINY_SIZE, color=ACCENT2)
+            wname = text(name, font_size=TINY_SIZE, color=ACCENT2)
             wname.next_to(outer, UP, buff=0.15)
             cache_engine = _box("Cache\nEngine", width=1.25, height=0.85, font_size=TINY_SIZE)
             model_shard = _box("Model\nShard", width=1.25, height=0.85, font_size=TINY_SIZE)
@@ -170,7 +167,7 @@ class S8Scheduling(Slide):
             worker_arrows.add(arrow)
 
         self.play(FadeIn(workers, lag_ratio=0.15))
-        self.play(*[GrowArrow(a) for a in worker_arrows])
+        self.play(*[shoot(a) for a in worker_arrows])
         cap = caption("Scheduler decides who runs; KV manager owns every block table; "
                        "workers move blocks on their own GPU")
         cap.to_edge(DOWN, buff=0.35)
@@ -316,7 +313,7 @@ class S8Scheduling(Slide):
         pcie_label = caption("over PCIe")
         pcie_label.next_to(pcie_arrow, UP, buff=0.15)
 
-        self.play(FadeIn(gpu_box), FadeIn(cpu_box), GrowArrow(pcie_arrow), FadeIn(pcie_label))
+        self.play(FadeIn(gpu_box), FadeIn(cpu_box), shoot(pcie_arrow), FadeIn(pcie_label))
 
         swap_blocks = VGroup(*[
             Square(side_length=0.5, fill_color=V_COLOR, fill_opacity=1.0, stroke_color=BLOCK_STROKE, stroke_width=2)
@@ -372,7 +369,7 @@ class S8Scheduling(Slide):
         rebuilt_label = caption("whole KV cache rebuilt at once")
         rebuilt_label.next_to(rebuilt, DOWN, buff=0.25)
 
-        self.play(GrowArrow(prefill_arrow), FadeIn(prefill_label))
+        self.play(shoot(prefill_arrow), FadeIn(prefill_label))
         self.play(FadeIn(rebuilt, lag_ratio=0.1), FadeIn(rebuilt_label))
         compare = caption("faster than decoding the whole thing token by token")
         compare.next_to(rebuilt_label, DOWN, buff=0.35)

@@ -22,18 +22,18 @@ from manim import (
     Dot,
     FadeIn,
     FadeOut,
-    GrowArrow,
     GrowFromEdge,
     Indicate,
     Line,
     Rectangle,
     RoundedRectangle,
     Square,
-    Text,
+    StealthTip,
     Transform,
     VGroup,
     Wait,
     Axes,
+    linear,
 )
 import math
 
@@ -54,6 +54,7 @@ from talk.theme import (
     TINY_SIZE,
     V_COLOR,
     WARN,
+    text,
 )
 
 __all__ = [
@@ -63,11 +64,16 @@ __all__ = [
     "KVBlock",
     "PhysicalMemGrid",
     "BlockTable",
+    "arrow",
     "arrow_map",
+    "shoot",
     "RefCountBadge",
     "MemoryBar",
     "MemoryPie",
     "GPUSchematic",
+    "TransformerBox",
+    "TokenKV",
+    "TransformerLoop",
     "attention_diagram",
     "bar_chart",
     "line_chart",
@@ -112,7 +118,7 @@ class TokenBox(VGroup):
 
     def __init__(self, word, color=FG, fill=BLOCK_FILL, width=None, height=0.6, font_size=SMALL_SIZE, **kw):
         super().__init__(**kw)
-        self.label = Text(str(word), font_size=font_size, color=color)
+        self.label = text(str(word), font_size=font_size, color=color)
         box_width = width if width is not None else max(self.label.width + 0.5, 1.0)
         self.box = RoundedRectangle(
             corner_radius=0.1,
@@ -157,7 +163,7 @@ class KVBlock(VGroup):
                 stroke_color=BLOCK_STROKE,
                 stroke_width=2,
             )
-            lbl = Text(str(words[i]) if i < len(words) else "", font_size=TINY_SIZE, color=FG)
+            lbl = text(str(words[i]) if i < len(words) else "", font_size=TINY_SIZE, color=FG)
             if lbl.width > 0.9 * cell:
                 lbl.scale_to_fit_width(0.9 * cell)
             self.cells.add(sq)
@@ -165,13 +171,13 @@ class KVBlock(VGroup):
         self.cells.arrange(RIGHT, buff=0.0)
         for sq, lbl in zip(self.cells, self.labels):
             lbl.move_to(sq.get_center())
-        self.index_label = Text("" if index is None else f"Block {index}", font_size=TINY_SIZE, color=MUTED)
+        self.index_label = text("" if index is None else f"Block {index}", font_size=TINY_SIZE, color=MUTED)
         self.index_label.next_to(self.cells, label_pos, buff=0.15)
         self.add(self.cells, self.labels, self.index_label)
 
     def fill_slot(self, i, word, color=ACCENT):
         """Fill slot i with `word`, colored `color`. Returns an Animation."""
-        new_label = Text(str(word), font_size=TINY_SIZE, color=FG)
+        new_label = text(str(word), font_size=TINY_SIZE, color=FG)
         if new_label.width > 0.9 * self.cell:
             new_label.scale_to_fit_width(0.9 * self.cell)
         new_label.move_to(self.cells[i].get_center())
@@ -186,7 +192,7 @@ class KVBlock(VGroup):
 
     def clear_slot(self, i):
         """Clear slot i back to empty. Returns an Animation."""
-        new_label = Text("", font_size=TINY_SIZE, color=FG)
+        new_label = text("", font_size=TINY_SIZE, color=FG)
         new_label.move_to(self.cells[i].get_center())
         old_label = self.labels[i]
         self.labels.remove(old_label)
@@ -214,7 +220,7 @@ class PhysicalMemGrid(VGroup):
         grid = VGroup(*self.blocks)
         rows = math.ceil(n_blocks / cols)
         grid.arrange_in_grid(rows=rows, cols=cols, buff=0.35)
-        self.title = Text(title, font_size=SMALL_SIZE, color=FG)
+        self.title = text(title, font_size=SMALL_SIZE, color=FG)
         self.title.next_to(grid, UP, buff=0.3)
         self.add(self.title, grid)
         self._grid = grid
@@ -229,11 +235,11 @@ class BlockTable(VGroup):
     def __init__(self, n_rows=4, title="Block table", show_filled=True, **kw):
         super().__init__(**kw)
         self.show_filled = show_filled
-        self.title = Text(title, font_size=SMALL_SIZE, color=FG)
+        self.title = text(title, font_size=SMALL_SIZE, color=FG)
         self.rows = []
         self._row_groups = VGroup()
         header_cells = ["logical", "physical"] + (["filled"] if show_filled else [])
-        header = VGroup(*[Text(h, font_size=TINY_SIZE, color=MUTED) for h in header_cells])
+        header = VGroup(*[text(h, font_size=TINY_SIZE, color=MUTED) for h in header_cells])
         header.arrange(RIGHT, buff=0.6)
         self._header = header
         self._body = VGroup()
@@ -243,10 +249,10 @@ class BlockTable(VGroup):
         self._layout()
 
     def _make_row(self, logical, physical, filled):
-        cells = [Text(str(logical), font_size=TINY_SIZE, color=FG)]
-        cells.append(Text("-" if physical is None else str(physical), font_size=TINY_SIZE, color=FG))
+        cells = [text(str(logical), font_size=TINY_SIZE, color=FG)]
+        cells.append(text("-" if physical is None else str(physical), font_size=TINY_SIZE, color=FG))
         if self.show_filled:
-            cells.append(Text("" if filled is None else str(filled), font_size=TINY_SIZE, color=FG))
+            cells.append(text("" if filled is None else str(filled), font_size=TINY_SIZE, color=FG))
         row = VGroup(*cells)
         row.arrange(RIGHT, buff=0.6)
         return row
@@ -293,12 +299,87 @@ class BlockTable(VGroup):
         return Indicate(self.rows[i]["mobject"], color=ACCENT)
 
 
+# ---------------------------------------------------------------------------
+# Arrows — thin shaft, small stealth tip, 2D light-ray intro
+# ---------------------------------------------------------------------------
+
+ARROW_STROKE = 1.6
+ARROW_TIP_LENGTH = 0.13
+ARROW_TIP_RATIO = 0.16
+ARROW_BUFF = 0.1
+
+
+def arrow(start, end, color=MUTED, **kw):
+    """Sharp 2D arrow: thin stroke, small stealth (kite) tip."""
+    kw.setdefault("stroke_width", ARROW_STROKE)
+    kw.setdefault("buff", ARROW_BUFF)
+    kw.setdefault("max_tip_length_to_length_ratio", ARROW_TIP_RATIO)
+    kw.setdefault("max_stroke_width_to_length_ratio", 12)
+    kw.setdefault("tip_shape", StealthTip)
+    kw.setdefault("tip_length", ARROW_TIP_LENGTH)
+    kw.setdefault("tip_style", {"stroke_width": 0})
+    return Arrow(start, end, color=color, **kw)
+
+
 def arrow_map(src, dst, color=MUTED, **kw):
     """A thin arrow between the centers of two mobjects."""
-    kw.setdefault("buff", 0.1)
-    kw.setdefault("stroke_width", 2.5)
-    kw.setdefault("max_tip_length_to_length_ratio", 0.15)
-    return Arrow(src.get_center(), dst.get_center(), color=color, **kw)
+    return arrow(src.get_center(), dst.get_center(), color=color, **kw)
+
+
+class Shoot(Create):
+    """Draw an arrow or line from its tail, like a 2D light ray.
+
+    ``GrowArrow`` / ``GrowFromEdge`` scale the whole mobject (tip included)
+    from a point, which reads as a 3D extrusion. This traces the shaft
+    along its path, then fades the tip in as the ray arrives.
+    """
+
+    def __init__(self, mobject, **kwargs):
+        kwargs.setdefault("rate_func", linear)
+        self._held_tip = getattr(mobject, "tip", None)
+        if self._held_tip is not None and self._held_tip in mobject.submobjects:
+            mobject.remove(self._held_tip)
+        else:
+            self._held_tip = None
+        super().__init__(mobject, **kwargs)
+
+    def interpolate_mobject(self, alpha):
+        super().interpolate_mobject(alpha)
+        tip = self._held_tip
+        if tip is None:
+            return
+        if alpha >= 0.88:
+            if tip not in self.mobject.submobjects:
+                self.mobject.add(tip)
+            fade = (alpha - 0.88) / 0.12
+            if fade < 0:
+                fade = 0.0
+            elif fade > 1:
+                fade = 1.0
+            tip.set_opacity(fade)
+        else:
+            tip.set_opacity(0)
+
+    def finish(self):
+        super().finish()
+        self._restore_tip()
+
+    def clean_up_from_scene(self, scene):
+        super().clean_up_from_scene(scene)
+        self._restore_tip()
+
+    def _restore_tip(self):
+        tip = self._held_tip
+        if tip is None:
+            return
+        if tip not in self.mobject.submobjects:
+            self.mobject.add(tip)
+        tip.set_opacity(1)
+
+
+def shoot(mobject, **kw):
+    """Light-ray intro for an Arrow or Line."""
+    return Shoot(mobject, **kw)
 
 
 class RefCountBadge(VGroup):
@@ -308,14 +389,14 @@ class RefCountBadge(VGroup):
         super().__init__(**kw)
         self.value = value
         self.circle = Circle(radius=0.22, color=color, fill_color=BG, fill_opacity=1.0, stroke_width=2.5)
-        self.label = Text(str(value), font_size=TINY_SIZE, color=color)
+        self.label = text(str(value), font_size=TINY_SIZE, color=color)
         self.label.move_to(self.circle.get_center())
         self.add(self.circle, self.label)
 
     def set_value(self, n):
         """Update the badge's displayed number. Returns an Animation."""
         self.value = n
-        new_label = Text(str(n), font_size=TINY_SIZE, color=self.label.color)
+        new_label = text(str(n), font_size=TINY_SIZE, color=self.label.color)
         new_label.move_to(self.circle.get_center())
         return Transform(self.label, new_label)
 
@@ -342,8 +423,8 @@ class MemoryBar(VGroup):
             )
             rect.move_to(self.outline.get_left() + RIGHT * (x + width / 2 + seg_w / 2))
             self.segs.add(rect)
-            text = f"{label} ({frac * 100:.0f}%)" if show_pct else label
-            txt = Text(text, font_size=TINY_SIZE, color=FG)
+            caption_str = f"{label} ({frac * 100:.0f}%)" if show_pct else label
+            txt = text(caption_str, font_size=TINY_SIZE, color=FG)
             if txt.width > seg_w * 0.9:
                 txt.scale_to_fit_width(max(seg_w * 0.9, 0.1))
             txt.move_to(rect.get_center())
@@ -386,7 +467,7 @@ class MemoryPie(VGroup):
         self.legend = VGroup()
         for (label, frac, color) in segments:
             swatch = Square(side_length=0.22, fill_color=color, fill_opacity=1.0, stroke_width=0)
-            txt = Text(f"{label} ({frac * 100:.0f}%)", font_size=TINY_SIZE, color=FG)
+            txt = text(f"{label} ({frac * 100:.0f}%)", font_size=TINY_SIZE, color=FG)
             txt.next_to(swatch, RIGHT, buff=0.15)
             entry = VGroup(swatch, txt)
             self.legend.add(entry)
@@ -427,7 +508,7 @@ class GPUSchematic(VGroup):
         self.vram_outline.next_to(chip, RIGHT, buff=width * 0.15)
         self.vram = Rectangle(width=vram_width, height=1e-6, fill_color=GOOD, fill_opacity=1.0, stroke_width=0)
         self.vram.move_to(self.vram_outline.get_bottom(), aligned_edge=DOWN)
-        self.vram_label = Text("VRAM", font_size=TINY_SIZE, color=MUTED)
+        self.vram_label = text("VRAM", font_size=TINY_SIZE, color=MUTED)
         self.vram_label.next_to(self.vram_outline, DOWN, buff=0.15)
 
         self._vram_height = vram_height
@@ -444,8 +525,235 @@ class GPUSchematic(VGroup):
 
 
 # ---------------------------------------------------------------------------
-# Attention diagram
+# Transformer box / decode loop (S1 spine)
 # ---------------------------------------------------------------------------
+
+_CHIP_SIDE = 0.26
+
+
+def _letter_chip(letter, color, side=_CHIP_SIDE):
+    """Tiny labeled square (Q / K / V)."""
+    sq = RoundedRectangle(
+        width=side,
+        height=side,
+        corner_radius=0.04,
+        fill_color=color,
+        fill_opacity=0.95,
+        stroke_width=0,
+    )
+    lab = text(letter, font_size=14, color=BG)
+    lab.move_to(sq.get_center())
+    group = VGroup(sq, lab)
+    group.sq = sq
+    group.lab = lab
+    return group
+
+
+class TransformerBox(VGroup):
+    """Opaque transformer. BLOCK_FILL interior, BLOCK_STROKE border; ACCENT when active."""
+
+    def __init__(self, width=7.0, height=2.4, label="TRANSFORMER", **kw):
+        super().__init__(**kw)
+        self.box = RoundedRectangle(
+            corner_radius=0.16,
+            width=width,
+            height=height,
+            fill_color=BLOCK_FILL,
+            fill_opacity=1.0,
+            stroke_color=BLOCK_STROKE,
+            stroke_width=2.5,
+        )
+        self.label = text(label, font_size=SMALL_SIZE, color=FG)
+        self.label.move_to(self.box.get_center())
+        self.add(self.box, self.label)
+        self._active = False
+
+    def set_active(self, active=True):
+        self._active = active
+        color = ACCENT if active else BLOCK_STROKE
+        width = 4.0 if active else 2.5
+        return self.box.animate.set_stroke(color=color, width=width)
+
+
+class TokenKV(VGroup):
+    """A TokenBox with K and V chips underneath. Optional Q chip."""
+
+    def __init__(
+        self,
+        word,
+        show_kv=True,
+        kv_opacity=1.0,
+        height=0.48,
+        font_size=18,
+        **kw,
+    ):
+        super().__init__(**kw)
+        self.word = str(word)
+        self.token = TokenBox(self.word, height=height, font_size=font_size)
+        self.k_chip = _letter_chip("K", K_COLOR)
+        self.v_chip = _letter_chip("V", V_COLOR)
+        chips = VGroup(self.k_chip, self.v_chip).arrange(RIGHT, buff=0.06)
+        chips.next_to(self.token, DOWN, buff=0.08)
+        self.q_chip = None
+        self.add(self.token, self.k_chip, self.v_chip)
+        if not show_kv:
+            kv_opacity = 0.0
+        if kv_opacity != 1.0:
+            self.k_chip.set_opacity(kv_opacity)
+            self.v_chip.set_opacity(kv_opacity)
+
+    def show_query(self):
+        """Place Q with K and V under the token (does not widen the row)."""
+        if self.q_chip is None:
+            self.q_chip = _letter_chip("Q", Q_COLOR)
+            self.add(self.q_chip)
+        self._layout_chips(with_q=True)
+        return self.q_chip
+
+    def hide_query(self):
+        chip = self.q_chip
+        if chip is None:
+            return None
+        chip.set_opacity(0)
+        self.remove(chip)
+        self.q_chip = None
+        self._layout_chips(with_q=False)
+        return chip
+
+    def _layout_chips(self, with_q=False):
+        items = []
+        if with_q and self.q_chip is not None:
+            items.append(self.q_chip)
+        items.extend([self.k_chip, self.v_chip])
+        row = VGroup(*items)
+        row.arrange(RIGHT, buff=0.05)
+        row.next_to(self.token, DOWN, buff=0.08)
+
+
+class TransformerLoop(VGroup):
+    """Sequence + KV above a centered transformer; new token below; append and recenter.
+
+    The box never moves. `append` is two scene steps: move output to the right of
+    the input, `adopt_output()`, then animate `input` to `input_centered_pos()`.
+    """
+
+    MAX_INPUT_WIDTH = 12.0
+    INPUT_BUFF = 0.10
+    IO_BUFF = 0.42
+
+    def __init__(self, words, show_kv=True, kv_opacity=0.25, **kw):
+        super().__init__(**kw)
+        self._tok_h = 0.48
+        self._tok_fs = 18
+        self._show_kv = show_kv
+        self.tbox = TransformerBox()
+        self.box = self.tbox
+        self.input = VGroup(
+            *[
+                TokenKV(w, show_kv=show_kv, kv_opacity=kv_opacity, height=self._tok_h, font_size=self._tok_fs)
+                for w in words
+            ]
+        )
+        self.input.arrange(RIGHT, buff=self.INPUT_BUFF)
+        self.output = None
+        self.tbox.move_to(ORIGIN + DOWN * 0.35)
+        self._place_input()
+        self.in_arrow = arrow(self.input.get_bottom(), self.tbox.get_top(), color=MUTED)
+        ghost = self.tbox.get_bottom() + DOWN * 0.55
+        self.out_arrow = arrow(self.tbox.get_bottom(), ghost, color=MUTED)
+        self.add(self.tbox, self.input, self.in_arrow, self.out_arrow)
+
+    def _place_input(self):
+        if self.input.width > self.MAX_INPUT_WIDTH:
+            self.input.scale(self.MAX_INPUT_WIDTH / self.input.width)
+        self.input.next_to(self.tbox, UP, buff=self.IO_BUFF)
+        self.input.set_x(self.tbox.get_center()[0])
+
+    def input_centered_pos(self):
+        """Target center for `.input` when parked above the box."""
+        y = self.tbox.get_top()[1] + self.IO_BUFF + self.input.height / 2
+        x = self.tbox.get_center()[0]
+        pos = self.tbox.get_center().copy()
+        pos[0] = x
+        pos[1] = y
+        return pos
+
+    def update_arrows(self):
+        self.in_arrow.put_start_and_end_on(self.input.get_bottom(), self.tbox.get_top())
+        if self.output is not None:
+            end = self.output.get_top()
+        else:
+            end = self.tbox.get_bottom() + DOWN * 0.55
+        self.out_arrow.put_start_and_end_on(self.tbox.get_bottom(), end)
+
+    def _match_input_scale(self, tok):
+        if len(self.input) == 0:
+            return
+        ref = self.input[0].token.height
+        if tok.token.height > 1e-6:
+            tok.scale(ref / tok.token.height)
+
+    def spawn_output(self, word, kv_opacity=1.0):
+        tok = TokenKV(
+            word,
+            show_kv=self._show_kv,
+            kv_opacity=kv_opacity,
+            height=self._tok_h,
+            font_size=self._tok_fs,
+        )
+        self._match_input_scale(tok)
+        tok.next_to(self.tbox, DOWN, buff=self.IO_BUFF)
+        tok.set_x(self.tbox.get_center()[0])
+        self.output = tok
+        self.add(tok)
+        self.update_arrows()
+        return tok
+
+    def join_point(self):
+        """World position for `.output` so it sits just to the right of the last input token."""
+        last = self.input[-1]
+        pos = self.output.get_center().copy()
+        pos[0] = last.get_right()[0] + self.INPUT_BUFF + self.output.width / 2
+        pos[1] = last.get_center()[1]
+        return pos
+
+    def join_delta(self):
+        """Shift the current input left by this so a join stays centered."""
+        extra = self.output.width + self.INPUT_BUFF
+        return LEFT * (extra / 2)
+
+    def adopt_output(self):
+        """Call after output has been moved to `join_point`. Does not recenter."""
+        tok = self.output
+        self.output = None
+        self.remove(tok)
+        self.input.add(tok)
+        return tok
+
+    def set_active(self, active=True):
+        return self.tbox.set_active(active)
+
+    def set_kv_opacity(self, alpha):
+        anims = []
+        for tok in self.input:
+            anims.append(tok.k_chip.animate.set_opacity(alpha))
+            anims.append(tok.v_chip.animate.set_opacity(alpha))
+        if self.output is not None:
+            anims.append(self.output.k_chip.animate.set_opacity(alpha))
+            anims.append(self.output.v_chip.animate.set_opacity(alpha))
+        return anims
+
+    def inner_point(self):
+        """Center of the open-box interior, below a parked label."""
+        return self.tbox.box.get_center() + DOWN * 0.22
+
+    def park_label_top(self):
+        target = self.tbox.box.get_top() + DOWN * 0.32
+        return self.tbox.label.animate.move_to(target)
+
+    def restore_label(self):
+        return self.tbox.label.animate.move_to(self.tbox.box.get_center())
+
 
 
 def attention_diagram(tokens, query_index, kv_colors=True):
@@ -473,7 +781,7 @@ def attention_diagram(tokens, query_index, kv_colors=True):
     query_box = token_boxes[query_index]
     query = Square(side_length=0.32, fill_color=q_color, fill_opacity=0.9, stroke_width=0)
     query.next_to(query_box, UP, buff=0.35)
-    q_label = Text("Q", font_size=TINY_SIZE, color=BG)
+    q_label = text("Q", font_size=TINY_SIZE, color=BG)
     q_label.move_to(query.get_center())
     query_group = VGroup(query, q_label)
 
@@ -481,15 +789,13 @@ def attention_diagram(tokens, query_index, kv_colors=True):
     for i, k_sq in enumerate(keys):
         if i == query_index:
             continue
-        arrow = Arrow(
+        arr = arrow(
             query.get_center(),
             k_sq.get_center(),
             buff=0.2,
-            stroke_width=1.5,
             color=MUTED,
-            max_tip_length_to_length_ratio=0.1,
         )
-        arrows.add(arrow)
+        arrows.add(arr)
 
     n = len(tokens)
     weight_vals = [1.0 / n] * n
@@ -574,7 +880,7 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
 
     x_labels = VGroup()
     for i, cat in enumerate(categories):
-        lbl = Text(str(cat), font_size=TINY_SIZE, color=MUTED)
+        lbl = text(str(cat), font_size=TINY_SIZE, color=MUTED)
         cat_center = axes.c2p(i + 0.5, 0)
         lbl.next_to(cat_center, DOWN, buff=0.2)
         x_labels.add(lbl)
@@ -599,7 +905,7 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
             rect.move_to(base, aligned_edge=DOWN)
             bar_group.add(rect)
             if value_labels:
-                vlabel = Text(f"{val:g}", font_size=TINY_SIZE, color=FG)
+                vlabel = text(f"{val:g}", font_size=TINY_SIZE, color=FG)
                 vlabel.next_to(rect, UP, buff=0.08)
                 bar_group.add(vlabel)
         chart.bars[name] = bar_group
@@ -608,7 +914,7 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
     legend = VGroup()
     for name in names:
         swatch = Square(side_length=0.2, fill_color=colors[name], fill_opacity=1.0, stroke_width=0)
-        txt = Text(name, font_size=TINY_SIZE, color=FG)
+        txt = text(name, font_size=TINY_SIZE, color=FG)
         txt.next_to(swatch, RIGHT, buff=0.12)
         legend.add(VGroup(swatch, txt))
     legend.arrange(RIGHT, buff=0.4)
@@ -617,7 +923,7 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
     chart.add(legend)
 
     if y_label:
-        ylab = Text(y_label, font_size=TINY_SIZE, color=MUTED)
+        ylab = text(y_label, font_size=TINY_SIZE, color=MUTED)
         ylab.rotate(math.pi / 2)
         ylab.next_to(axes, LEFT, buff=0.8)
         chart.y_label = ylab
@@ -688,7 +994,7 @@ def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, co
 
     x_labels = VGroup()
     for xi in x:
-        lbl = Text(f"{xi:g}", font_size=TINY_SIZE, color=MUTED)
+        lbl = text(f"{xi:g}", font_size=TINY_SIZE, color=MUTED)
         lbl.next_to(axes.c2p(xi, y_range[0]), DOWN, buff=0.15)
         x_labels.add(lbl)
     chart.add(x_labels)
@@ -699,7 +1005,7 @@ def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, co
     for i in range(n_yticks):
         ty = y_range[0] + i * (y_range[1] - y_range[0]) / (n_yticks - 1)
         val = 10 ** ty if log_y else ty
-        lbl = Text(f"{val:.3g}", font_size=TINY_SIZE, color=MUTED)
+        lbl = text(f"{val:.3g}", font_size=TINY_SIZE, color=MUTED)
         lbl.next_to(axes.c2p(x_range[0], ty), LEFT, buff=0.15)
         y_ticks.add(lbl)
     chart.add(y_ticks)
@@ -721,7 +1027,7 @@ def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, co
     legend = VGroup()
     for name in names:
         swatch = Line(ORIGIN, RIGHT * 0.3, color=colors[name], stroke_width=3)
-        txt = Text(name, font_size=TINY_SIZE, color=FG)
+        txt = text(name, font_size=TINY_SIZE, color=FG)
         txt.next_to(swatch, RIGHT, buff=0.12)
         legend.add(VGroup(swatch, txt))
     legend.arrange(RIGHT, buff=0.4)
@@ -730,12 +1036,12 @@ def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, co
     chart.add(legend)
 
     if x_label:
-        xlab = Text(x_label, font_size=TINY_SIZE, color=MUTED)
+        xlab = text(x_label, font_size=TINY_SIZE, color=MUTED)
         xlab.next_to(axes, DOWN, buff=0.6)
         chart.x_label = xlab
         chart.add(xlab)
     if y_label:
-        ylab = Text(y_label, font_size=TINY_SIZE, color=MUTED)
+        ylab = text(y_label, font_size=TINY_SIZE, color=MUTED)
         ylab.rotate(math.pi / 2)
         ylab.next_to(axes, LEFT, buff=0.7)
         chart.y_label = ylab
