@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Manim and manim-slides generated output
+media/
+slides/
+dist/
+
+# Local QA output
+qa/
+.qa/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local environment and logs
+.env
+.env.*
+!.env.example
+*.log
