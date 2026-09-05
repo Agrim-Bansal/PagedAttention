@@ -138,7 +138,7 @@ class S11Takeaways(Slide):
         )
         citation.next_to(divider, DOWN, buff=0.5)
 
-        contact = caption("[your name] - [your contact info]")
+        contact = caption("Agrim Bansal")
         contact.next_to(citation, DOWN, buff=0.6)
 
         self.play(FadeIn(thanks))

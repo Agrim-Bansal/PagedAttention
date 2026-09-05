@@ -62,7 +62,7 @@ make present
 which runs:
 
 ```
-.venv/bin/manim-slides present S0Title S1Transformers S2GPU S3KVCache S4Problem \
+.venv/bin/manim-slides present S0Title S1GPU S2Transformers S3KVCache S4Problem \
   S5PagedAttention S6OSAndWhyHard S7Sharing S8Scheduling S9Results S10Ablations S11Takeaways
 ```
 
@@ -94,7 +94,7 @@ make html
 which runs:
 
 ```
-.venv/bin/manim-slides convert S0Title S1Transformers S2GPU S3KVCache S4Problem \
+.venv/bin/manim-slides convert S0Title S1GPU S2Transformers S3KVCache S4Problem \
   S5PagedAttention S6OSAndWhyHard S7Sharing S8Scheduling S9Results S10Ablations S11Takeaways \
   dist/pagedattention_talk.html --to html \
   -cslide_number=true -ccontrols=true -cprogress=true -ctransition=none \
@@ -152,7 +152,7 @@ make narration
 
 which runs `tools/build_narration.py` — a small, dependency-light script (only
 `ast`/`re`, no manim import) that reads each `talk/sN_*.py`'s docstring and
-writes the combined script with a per-act table of contents and target timing
+writes the combined script with a per-act table of contents
 pulled from `talk/CONTRACT.md`'s scene table.
 
 ## Cleaning up
@@ -168,7 +168,7 @@ html` produce; source files are untouched).
 ## Further reading
 
 - `talk/CONTRACT.md` — the binding spec for `theme.py`/`components.py`'s API
-  and per-scene structure (beat counts, target minutes, color conventions).
+  and per-scene structure (beat counts, color conventions).
 - `TALK_PLAN.md` — what each scene covers, the paper-figure-to-scene mapping,
   and the key numbers that must stay consistent across scenes.
 - `PLANNING_NOTES.md` — process/planning notes behind the deck.

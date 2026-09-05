@@ -5,8 +5,8 @@ PYTHON := $(VENV)/bin/python
 # Scenes in talk-order (S0 -> S11): file, class.
 SCENE_FILES := \
 	talk/s0_title.py \
-	talk/s1_transformers.py \
-	talk/s2_gpu.py \
+	talk/s1_gpu.py \
+	talk/s2_transformers.py \
 	talk/s3_kvcache.py \
 	talk/s4_problem.py \
 	talk/s5_pagedattention.py \
@@ -19,8 +19,8 @@ SCENE_FILES := \
 
 SCENE_CLASSES := \
 	S0Title \
-	S1Transformers \
-	S2GPU \
+	S1GPU \
+	S2Transformers \
 	S3KVCache \
 	S4Problem \
 	S5PagedAttention \
@@ -34,8 +34,8 @@ SCENE_CLASSES := \
 # Paired (file class) list, in order, for the render targets.
 SCENE_PAIRS := \
 	talk/s0_title.py:S0Title \
-	talk/s1_transformers.py:S1Transformers \
-	talk/s2_gpu.py:S2GPU \
+	talk/s1_gpu.py:S1GPU \
+	talk/s2_transformers.py:S2Transformers \
 	talk/s3_kvcache.py:S3KVCache \
 	talk/s4_problem.py:S4Problem \
 	talk/s5_pagedattention.py:S5PagedAttention \

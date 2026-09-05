@@ -1,4 +1,4 @@
-"""S2 — Why GPUs (Act I). Standalone primer; written to sit before transformers.
+"""S1 — Why GPUs (Act I). Standalone primer; sits before transformers.
 
 NARRATION
 ---------
@@ -249,7 +249,7 @@ def _weights_block(width=2.5, height=1.9):
     return group
 
 
-class S2GPU(Slide):
+class S1GPU(Slide):
     def construct(self):
         apply_theme(self)
 

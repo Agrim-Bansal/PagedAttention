@@ -25,7 +25,7 @@ Beat 4 — Roadmap
 Here's the shape of the talk, in three acts. Act I: why memory — not compute — is the
 real bottleneck. Act II: the paper's core idea — chop the KV cache into small fixed-size
 blocks and manage them on demand. Act III: the payoffs — the actual speedups and sharing
-tricks. Let's start with the bottleneck.
+tricks. Let's start with the GPU.
 """
 
 from manim import (

@@ -29,9 +29,9 @@ Spec of *what* each scene shows: `../TALK_PLAN.md`. Paper facts: `../paper_notes
 - Clean up: at the end of a scene, `self.play(FadeOut(*self.mobjects))` is fine but not
   required.
 - Every scene file has a module docstring with a **NARRATION** section: for each beat,
-  `Beat N — <title>`: 2–5 sentences the presenter can say, plus `[PAUSE]` markers where
-  audience interaction happens. This is the speaker script and is compiled later into
-  `NARRATION.md`.
+  `Beat N — <title>`: the spoken sentences the presenter needs for that beat. Do not
+  shorten for a time budget. Plus `[PAUSE]` markers where audience interaction happens.
+  This is the speaker script and is compiled later into `NARRATION.md`.
 - Keep text short. Max ~12 words per line on screen. Titles at top, `font_size=TITLE_SIZE`.
 - Numbers on screen must match `PAPER_REFERENCE.md` / TALK_PLAN "Key numbers".
 - Test: after writing, render with `-ql` and fix all errors. Then inspect at least the
@@ -40,20 +40,20 @@ Spec of *what* each scene shows: `../TALK_PLAN.md`. Paper facts: `../paper_notes
   frames, or use `-ql -s` on `manim` for a single frame) and confirm nothing overflows the
   frame or overlaps illegibly.
 
-| File | Class | Act | Target beats | Target minutes |
-|---|---|---|---|---|
-| s0_title.py | S0Title | I | 3–4 | 1–2 |
-| s1_transformers.py | S1Transformers | I | 8–10 | 6 |
-| s2_gpu.py | S2GPU | I | 8–10 | ~6 |
-| s3_kvcache.py | S3KVCache | I | 10–12 | 9–11 |
-| s4_problem.py | S4Problem | I | 7–9 | 6–7 |
-| s5_pagedattention.py | S5PagedAttention | II | 9–12 | 7–8 |
-| s6_os_and_why_hard.py | S6OSAndWhyHard | II | 6–8 | 4–5 |
-| s7_sharing.py | S7Sharing | III | 7–9 | 5 |
-| s8_scheduling.py | S8Scheduling | III | 6–8 | 4 |
-| s9_results.py | S9Results | III | 8–10 | 4–5 |
-| s10_ablations.py | S10Ablations | III | 3–4 | 2 |
-| s11_takeaways.py | S11Takeaways | III | 3–4 | 1–2 |
+| File | Class | Act | Target beats |
+|---|---|---|---|
+| s0_title.py | S0Title | I | 3–4 |
+| s1_gpu.py | S1GPU | I | 8 |
+| s2_transformers.py | S2Transformers | I | 10 |
+| s3_kvcache.py | S3KVCache | I | 10–12 |
+| s4_problem.py | S4Problem | I | 20 |
+| s5_pagedattention.py | S5PagedAttention | II | 17 (heaviest; see TALK_PLAN) |
+| s6_os_and_why_hard.py | S6OSAndWhyHard | II | 11 |
+| s7_sharing.py | S7Sharing | III | 10–12 |
+| s8_scheduling.py | S8Scheduling | III | 15 (pressure story; mechanics, no Fig 19) |
+| s9_results.py | S9Results | III | 13 |
+| s10_ablations.py | S10Ablations | III | 3–4 |
+| s11_takeaways.py | S11Takeaways | III | 3–4 |
 
 ## theme.py (exports)
 
@@ -153,27 +153,29 @@ class TokenKV(VGroup):
     def __init__(self, word, show_kv=True, kv_opacity=1.0, height=0.5, font_size=SMALL_SIZE)
 
 class TransformerLoop(VGroup):
-    """S1 spine: input sequence+KV above a centered TransformerBox, output below.
+    """S2 spine: input sequence+KV above a centered TransformerBox, output below.
     Box never moves. append_and_recenter(word) adds the output token onto the input
     and recenters the input over the box. .box, .input, .in_arrow, .out_arrow, .output.
     set_active(bool), set_kv_opacity(alpha), place_output(word), clear_output()."""
     def __init__(self, words, show_kv=True, kv_opacity=0.25)
 
 def attention_diagram(tokens, query_index, kv_colors=True) -> VGroup
-    """Q/K/V computation visual (scratch / overlay, not the S1 spine): row of TokenBoxes,
+    """Q/K/V computation visual (scratch / overlay, not the S2 spine): row of TokenBoxes,
     K and V under each, a Q above the query token, arrows from Q to each K, a softmax
     bar row, weighted sum arrow to output. .tokens, .keys, .values, .query, .arrows,
     .weights, .output."""
 
 def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, height=4,
-              value_labels=False) -> VGroup
-    """Grouped bar chart. series = {"name": [values...]}. Native Rectangles on an Axes.
-    .axes, .bars (dict name -> VGroup), .legend, .x_labels. Animate with
-    scene.play(*[GrowFromEdge(b, DOWN) for b in ...]) or .animate_in()."""
+              value_labels=False, show_legend=True, x_label="") -> VGroup
+    """Grouped bar chart. Bars placed via axes.c2p (x, width, height share one space).
+    .axes, .bars (name -> Rectangles only), .value_labels, .legend, .x_labels, .y_ticks,
+    .grid. fade_frame() / grow_series(name) / animate_in()."""
 
 def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, colors=None,
-               width=8, height=4, log_y=False, markers=True) -> VGroup
-    """Multi-series line chart. .axes, .lines (dict), .dots (dict), .legend. .animate_in()."""
+               width=8, height=4, log_y=False, markers=True, marker_shapes=None,
+               stroke_widths=None, show_legend=True, x_ticks=None, x_tick_labels=None) -> VGroup
+    """Multi-series line chart. Sparse ticks, dashed y-grid. marker_shapes: circle/square/
+    triangle/x. .axes, .lines, .dots, .legend. fade_frame() / draw_series(name) / animate_in()."""
 ```
 
 Charts and axes must use `Text` for labels (pass `axis_config={"include_numbers": False}` and add

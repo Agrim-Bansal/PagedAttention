@@ -6,26 +6,26 @@ Auto-generated from the `NARRATION` section of each scene's module docstring in 
 
 ### Act I: Why memory is the bottleneck
 
-- [S0 S0Title (~1-2 min)](#s0-s0title)
-- [S1 S1Transformers (~6 min)](#s1-s1transformers)
-- [S2 S2GPU (~6 min)](#s2-s2gpu)
-- [S3 S3KVCache (~9-11 min)](#s3-s3kvcache)
-- [S4 S4Problem (~6-7 min)](#s4-s4problem)
+- [S0 S0Title](#s0-s0title)
+- [S1 S1GPU](#s1-s1gpu)
+- [S2 S2Transformers](#s2-s2transformers)
+- [S3 S3KVCache](#s3-s3kvcache)
+- [S4 S4Problem](#s4-s4problem)
 
 ### Act II: PagedAttention
 
-- [S5 S5PagedAttention (~7-8 min)](#s5-s5pagedattention)
-- [S6 S6OSAndWhyHard (~4-5 min)](#s6-s6osandwhyhard)
+- [S5 S5PagedAttention](#s5-s5pagedattention)
+- [S6 S6OSAndWhyHard](#s6-s6osandwhyhard)
 
 ### Act III: What it buys you
 
-- [S7 S7Sharing (~5 min)](#s7-s7sharing)
-- [S8 S8Scheduling (~4 min)](#s8-s8scheduling)
-- [S9 S9Results (~4-5 min)](#s9-s9results)
-- [S10 S10Ablations (~2 min)](#s10-s10ablations)
-- [S11 S11Takeaways (~1-2 min)](#s11-s11takeaways)
+- [S7 S7Sharing](#s7-s7sharing)
+- [S8 S8Scheduling](#s8-s8scheduling)
+- [S9 S9Results](#s9-s9results)
+- [S10 S10Ablations](#s10-s10ablations)
+- [S11 S11Takeaways](#s11-s11takeaways)
 
-## S0 S0Title (~1-2 min)
+## S0 S0Title
 
 Beat 1 — Title card
 This talk is about "Efficient Memory Management for LLM Serving with PagedAttention" —
@@ -50,9 +50,65 @@ Beat 4 — Roadmap
 Here's the shape of the talk, in three acts. Act I: why memory — not compute — is the
 real bottleneck. Act II: the paper's core idea — chop the KV cache into small fixed-size
 blocks and manage them on demand. Act III: the payoffs — the actual speedups and sharing
-tricks. Let's start with the bottleneck.
+tricks. Let's start with the GPU.
 
-## S1 S1Transformers (~6 min)
+## S1 S1GPU
+
+---------
+Beat 1 — Same math, over and over.
+Neural-net serving is not fancy one-off logic. Under the hood it is the same
+matrix multiply, again and again, against a huge shared weight matrix W.
+One small input, one giant W, one small output — and that pattern repeats
+across the whole model. [PAUSE] That "same operation, many times" shape is
+exactly what a GPU is built for.
+
+Beat 2 — CPU vs GPU.
+A CPU has a handful of big, fast cores. Great at one complicated thing at a
+time. Watch them light up in sequence. A GPU flips the trade: thousands of
+small, simple cores. Give it a pile of identical multiplies and it runs them
+all at once, one piece per core. [PAUSE] Our workload — the same multiply,
+many times — maps almost perfectly onto that grid.
+
+Beat 3 — Two memory pools.
+Here is the catch that matters for serving. The GPU does not borrow the
+computer's regular RAM. It has its own memory, called VRAM, sitting next to
+the cores. CPU DRAM and GPU VRAM are two separate pools, joined by a PCIe
+link that is slow compared to on-device memory. Cores can only multiply data
+that is already in VRAM. If it is still on the CPU side, the GPU is waiting.
+
+Beat 4 — Weights persist in VRAM.
+So the model's weights have to live in VRAM for the whole time we are
+serving. For OPT-13B on an A100, that is about 26 gigabytes of a 40-gigabyte
+card. Sixty-five percent of the GPU's memory is gone the moment the model
+loads — before we have served a single request. [PAUSE] Those weights stay
+there. They do not come and go per request.
+
+Beat 5 — One request vs 26 GB.
+Now send in one request. The cores have to stream that whole 26 GB of
+weights to produce one small result. Most of the time they are waiting on
+memory, not multiplying. A single request is a tiny amount of math against a
+huge W, so the machine looks idle even though VRAM is already packed.
+Serving one-at-a-time wastes the GPU.
+
+Beat 6 — Batching: one hub, many requests.
+The fix is batching. The weights are identical for every request, so we load
+W once and send many requests through the same multiply. Watch: every
+request arrow ends at one point on W, and every result arrow starts from
+that same point. One pass over the weights, N results. [PAUSE] Throughput
+becomes a question of how many requests we can pack into that one pass.
+
+Beat 7 — Leftover VRAM is the budget.
+Almost for free — except leftover VRAM is finite. Weights already took
+26 GB. The empty slice at the top is all we have for live request state.
+Some requests fit; the rest bounce off. We cannot batch more than that
+leftover space can hold. [PAUSE]
+
+Beat 8 — Landing.
+So: leftover VRAM decides the maximum batch, and the maximum batch decides
+throughput. That is the resource this talk is about. Everything that follows
+is about how we spend that leftover slice.
+
+## S2 S2Transformers
 
 Beat 1 — One word at a time
 You do not need the word "transformer" yet. A language model does not write a
@@ -116,68 +172,12 @@ and the Value of every previous token, not just the most recent one. That growin
 bundle sits in memory between iterations — at every layer, every decode step, for
 the entire request. That is the state the rest of this talk is about.
 
-## S2 S2GPU (~6 min)
-
----------
-Beat 1 — Same math, over and over.
-Neural-net serving is not fancy one-off logic. Under the hood it is the same
-matrix multiply, again and again, against a huge shared weight matrix W.
-One small input, one giant W, one small output — and that pattern repeats
-across the whole model. [PAUSE] That "same operation, many times" shape is
-exactly what a GPU is built for.
-
-Beat 2 — CPU vs GPU.
-A CPU has a handful of big, fast cores. Great at one complicated thing at a
-time. Watch them light up in sequence. A GPU flips the trade: thousands of
-small, simple cores. Give it a pile of identical multiplies and it runs them
-all at once, one piece per core. [PAUSE] Our workload — the same multiply,
-many times — maps almost perfectly onto that grid.
-
-Beat 3 — Two memory pools.
-Here is the catch that matters for serving. The GPU does not borrow the
-computer's regular RAM. It has its own memory, called VRAM, sitting next to
-the cores. CPU DRAM and GPU VRAM are two separate pools, joined by a PCIe
-link that is slow compared to on-device memory. Cores can only multiply data
-that is already in VRAM. If it is still on the CPU side, the GPU is waiting.
-
-Beat 4 — Weights persist in VRAM.
-So the model's weights have to live in VRAM for the whole time we are
-serving. For OPT-13B on an A100, that is about 26 gigabytes of a 40-gigabyte
-card. Sixty-five percent of the GPU's memory is gone the moment the model
-loads — before we have served a single request. [PAUSE] Those weights stay
-there. They do not come and go per request.
-
-Beat 5 — One request vs 26 GB.
-Now send in one request. The cores have to stream that whole 26 GB of
-weights to produce one small result. Most of the time they are waiting on
-memory, not multiplying. A single request is a tiny amount of math against a
-huge W, so the machine looks idle even though VRAM is already packed.
-Serving one-at-a-time wastes the GPU.
-
-Beat 6 — Batching: one hub, many requests.
-The fix is batching. The weights are identical for every request, so we load
-W once and send many requests through the same multiply. Watch: every
-request arrow ends at one point on W, and every result arrow starts from
-that same point. One pass over the weights, N results. [PAUSE] Throughput
-becomes a question of how many requests we can pack into that one pass.
-
-Beat 7 — Leftover VRAM is the budget.
-Almost for free — except leftover VRAM is finite. Weights already took
-26 GB. The empty slice at the top is all we have for live request state.
-Some requests fit; the rest bounce off. We cannot batch more than that
-leftover space can hold. [PAUSE]
-
-Beat 8 — Landing.
-So: leftover VRAM decides the maximum batch, and the maximum batch decides
-throughput. That is the resource this talk is about. Everything that follows
-is about how we spend that leftover slice.
-
-## S3 S3KVCache (~9-11 min)
+## S3 S3KVCache
 
 ---------
 Beat 1 — Pickup.
-Last scene, leftover VRAM was the serving budget. The scene before that, the
-box needed the Key and Value of every previous token to write the next word.
+Last scene, the box needed the Key and Value of every previous token to write
+the next word. The scene before that, leftover VRAM was the serving budget.
 That bundle is still sitting here — watch the Query on "years" look across
 every Key. We are going to name this bundle, size it, and put it in that
 leftover slice. [PAUSE]
@@ -255,455 +255,651 @@ is a timeline, not a dictionary of words. Leftover VRAM is spent on these
 growing rows; how we lay them out is the batch size. [PAUSE] So: how do you
 allocate memory for something whose final size is unknown?
 
-## S4 S4Problem (~6-7 min)
+## S4 S4Problem
 
 ---------
 Beat 1 — The question.
-How do you allocate memory for something whose final size is unknown? A
-request's output length is unknown until the model itself emits an
-end-of-sequence token — there is no header, no content-length field, nothing
-that tells you in advance how long the answer will be.
-[PAUSE]
-Take a second — how would you design this? (Typical answers to react to:
-"guess and reallocate as you go" — reallocating a growing tensor is exactly
-what causes copies and stalls; "use a linked list of small chunks" — closer
-to the real answer, but on a GPU kernel indirection is expensive; "just
-reserve the maximum possible length" — this is in fact what every serving
-system did before this paper, and it is our next beat.)
+Last scene left us with a question: how do you allocate memory for a KV cache
+whose final size is unknown? A request has no content-length. It grows until
+the model emits end-of-sequence. Sit with that. How would you lay this object
+down in leftover VRAM? [PAUSE]
 
-Beat 2 — Reserve the maximum.
-Systems like FasterTransformer and Orca solve "unknown final size" the
-simplest possible way: they pre-allocate one contiguous chunk of GPU memory
-sized to the model's maximum sequence length — for OPT, that is 2048 slots —
-the moment a request arrives. Request A claims its 2048-slot strip up front,
-whether it ends up needing 10 tokens or 2000.
+Beat 2 — One contiguous tensor.
+Existing systems all give the same answer. They store each request's KV cache
+as one contiguous tensor. Not because that is a good fit for a growing cache —
+because that is what deep learning frameworks require. An operator wants a
+contiguous chunk. So the serving system hands it one. [PAUSE]
 
-Beat 3 — Fig. 3, zoomed in on Request A.
-Let's put real tokens on this strip: "Four score and seven years ago our" —
-seven prompt tokens already have KV cache computed, shown filled. "brought"
-is the current iteration — the token being generated right now. A couple of
-slots just past it are reserved for the immediate next tokens — idle right
-now, but nobody else can borrow them. And then: 2038 slots, allocated the
-instant the request arrived, that this request will never touch if it stops
-early. That's internal fragmentation — memory that belongs to a request but
-holds nothing.
+Beat 3 — Unlike a traditional tensor.
+That choice was fine for the tensors in traditional deep learning workloads.
+Those have a fixed, known shape before you ever run the model: allocate once,
+contiguous is perfect, there is nothing to fragment. The KV cache is different
+in kind. It dynamically grows and shrinks as the model generates tokens, and
+its lifetime and length are not known a priori. Nobody — not the system, not
+the model — knows where it stops until it stops. [PAUSE]
 
-Beat 4 — Request B arrives, and a second waste appears.
-Request B, "You only live once," gets its own reserved strip the same way:
-3 tokens filled, "once" as the current iteration, a couple of reserved
-slots, and 507 slots of its own internal fragmentation. But look at the gap
-the allocator leaves between A's chunk and B's chunk — it's real free
-memory, but it's the wrong shape for any other request's reservation to fit
-into. That gap is external fragmentation, and it's dead until both A and B
-finish.
+Beat 4 — Pre-allocate the maximum.
+So FasterTransformer and Orca do the conservative thing. They statically
+allocate a contiguous chunk to the request's maximum possible sequence length,
+irrespective of the actual input or the eventual output. Request A is given
+2048 slots — OPT's max — the moment it arrives. Used or not, that whole strip
+is spoken for. [PAUSE]
 
-Beat 5 — Zoom out: Fig. 2, the whole KV region.
-Across a real serving run, the paper measured this precisely. Orca that
-always reserves the max: only 20.4% of its KV memory is holding actual
-token state — the rest is reservation, internal fragmentation, and external
-fragmentation. Even Orca's best-case, oracle-knows-the-future variant only
-reaches 38.2%. [PAUSE] So: across existing systems, only 20 to 40% of the
-KV memory you paid for is doing any work. What do you think the system in
-this paper achieves? We'll come back to that number.
+Beat 5 — Request B is smaller, still a slab.
+The paper's Figure 3 also has a second request. Request B is allowed a maximum
+of 512, not 2048. Same rule, different size: one contiguous chunk, reserved up
+front. Two slabs of different lengths, sitting in the same leftover VRAM.
+Remember 512 — it is how 507 unused slots will show up in a moment. [PAUSE]
 
-Beat 6 — This problem is new.
-Here's something worth sitting with: paging was never needed before large
-language models. A pre-LLM deep learning tensor — a batch of images, say —
-has a fixed, known shape before you ever run the model: 32 images, 3
-channels, 224 by 224 pixels. Contiguous allocation is perfect for that,
-there is nothing to fragment. The KV cache is different in kind: its length
-grows one token at a time, per request, and nobody — not the system, not
-the model — knows where it stops until it stops.
+Beat 6 — Fig. 3, the prompt.
+Here is Figure 3, on our running example. Seven KV cache states for request A's
+prompt, already computed: "Four score and seven years ago our." Each box is
+that token's Key and Value — not the word itself. [PAUSE]
 
-Beat 7 — The second gap: no sharing.
-Contiguous allocation has a second, quieter cost. If two requests share the
-same prompt — say, two parallel samples of one question — a contiguous
-system stores that identical prompt's KV cache twice, once per request,
-because each request owns one indivisible chunk. There is no way to point
-two requests at the same physical memory when memory is handed out as
-monolithic strips. Every duplicate prompt is wasted memory that a smarter
-layout wouldn't need to pay for at all.
+Beat 7 — Current iteration.
+"brought" is the current iteration: the token being generated right now. Its
+slot is live. It is not waste. It is the work this step is doing. [PAUSE]
 
-Beat 8 — Summary.
-So we have four distinct wastes stacked on top of each other: reservation
-for tokens not yet generated, internal fragmentation from guessing a max
-length wrong, external fragmentation between requests, and duplicated
-memory because identical content can't be shared. All four come from one
-design choice: forcing each request's KV cache into one contiguous block.
-Put simply — memory, not compute, caps how many requests a GPU can serve at
-once.
+Beat 8 — Reserved.
+Two slots past it are reserved for tokens this request will actually generate
+— "forth", and end-of-sequence. The paper marks "1 slot for generated token"
+and "2 slots future used." Reserved memory is eventually used. But it occupies
+space for the entire request's duration, space that could otherwise have gone
+to other requests. [PAUSE]
 
-Beat 9 — Seam to Act II.
+Beat 9 — Internal fragmentation.
+The rest of the 2048 is still sitting there — empty slots, never written.
+That is internal fragmentation. Watch them fill the remainder of A's slab.
+Two thousand and thirty-eight slots never used. Pure waste. We only realize
+it after sampling finishes and we know the request stopped early. [PAUSE]
+
+Beat 10 — Request B.
+Request B, same treatment, max 512. Prompt "You only live," current "once,"
+one reserved slot, and then the same empty-slot cascade: 507 never used.
+Same internal-fragmentation story, smaller slab. [PAUSE]
+
+Beat 11 — External fragmentation.
+The hole between the two chunks is free memory with the wrong shape. Watch
+another request try to land there. It does not fit. That is external
+fragmentation: known before we even serve, and it will never hold generated
+tokens. The three wastes together keep other requests out of the GPU. [PAUSE]
+
+Beat 12 — Even if you knew the length.
+Even if the actual length were known a priori, that unused pink still belongs
+to A for the whole lifetime. A shorter request cannot borrow it. Knowing the
+future does not break the slab. [PAUSE]
+
+Beat 13 — Fig. 2, Orca (Max).
+Figure 2 measures this on a real serving run. Orca that always reserves the
+max — the policy we just watched — puts actual token state in only 20.4
+percent of its KV memory. 57.3 percent is internal fragmentation. 13.3 percent
+is reservation. 8.9 percent is external fragmentation and other. [PAUSE]
+
+Beat 14 — Orca (Pow2).
+Round the reservation up to a power of two instead. Internal fragmentation
+drops. External fragmentation blows up to 41.6 percent. You moved the waste;
+you did not remove it. Token state is still only 26.8 percent. [PAUSE]
+
+Beat 15 — Orca (Oracle).
+Give the system an oracle: every output length in advance. Internal
+fragmentation goes to zero. You still only reach 38.2 percent token state.
+Unknown length was never the whole problem. Contiguity is. [PAUSE]
+
+Beat 16 — What does this paper reach?
+Across existing systems, only 20.4 to 38.2 percent of the KV memory you paid
+for stores actual token states. The paper's system is the last bar. We will
+come back to that number. [PAUSE]
+
+Beat 17 — Second failure: two copies.
+Contiguous chunks have a second cost. Existing systems cannot share, because
+each sequence's KV cache is a separate contiguous space. Watch the prompt
+copy: identical prefix, two full copies. [PAUSE]
+
+Beat 18 — Twelve percent, and more in beam search.
+In the paper's experiment the prompt was 12 percent of total KV — paid once
+per sample, not once per prompt. In beam search, sharing could save up to
+55 percent. A contiguous system cannot point two sequences at the same
+physical memory. [PAUSE]
+
+Beat 19 — One cause.
+One design. Each request's KV cache is a contiguous chunk, pre-allocated to a
+maximum length. Three wastes, and sharing is impossible. Memory, not compute,
+caps how many requests the GPU can serve. [PAUSE]
+
+Beat 20 — Seam to Act II.
 [act_checkpoint — presenter narrates while it plays]
 
-## S5 S5PagedAttention (~7-8 min)
+## S5 S5PagedAttention
 
-Beat 1 — The idea in one line
-Here's the paper's fix, in one sentence: instead of one growing, contiguous slab
-of memory per request, chop each request's KV cache into small fixed-size
-chunks called blocks. The paper's default block size is 16 tokens; to keep the
-pictures readable I'll draw blocks of 4. Watch our running example, "Four score
-and seven years ago our fathers brought forth," get sliced into three blocks of
-four tokens each — the last one only half full. [PAUSE] Note that block size is
-fixed once and for all, chosen ahead of time — it does not depend on how long
-any particular request turns out to be.
+Beat 1 — Who demanded contiguity?
+Here is where Act I left us: request A owns one contiguous chunk, ten slots
+in use, two thousand and thirty-eight reserved and never used. Before we fix
+it, ask why the chunk had to be contiguous in the first place. It is not a
+property of memory. It is a property of the code that reads the memory. The
+attention operator, like most operators in PyTorch or TensorFlow, takes K as
+one matrix and V as one matrix, and it wants each of them laid out back to
+back. The reader dictates the layout. [PAUSE] So the paper's first move is
+not a new allocator. It is a new reader: an attention kernel that does not
+need the whole row side by side. Change the reader, and the layout is free.
 
-Beat 2 — Logical vs. physical blocks
-Here's the key trick: blocks don't have to live next to each other in memory.
-Each request has a logical view — its blocks in order, 0, 1, 2 — but those
-logical blocks can be scattered anywhere in physical GPU memory. A block table
-records, for each logical block, which physical block it actually lives in, and
-how many of its slots are currently filled. And blocks are handed out lazily:
-vLLM only grabs a new physical block once the current last block is completely
-full. That laziness is what kills internal fragmentation.
+Beat 2 — Partition into fixed-size blocks
+Step one of the new reader: partition the KV cache of each sequence into
+fixed-size blocks. The paper's default is sixteen tokens per block; I will
+draw four so it fits on a slide. Our ten tokens become three blocks: four,
+four, and a last block that is half full. Notice what is missing: the two
+thousand reserved slots. We have not allocated them. Nothing about the block
+size depends on how long this request will turn out to be.
 
-Beat 3 — The kernel: attention over scattered blocks (Fig. 5)
-So if the blocks are scattered, how does attention even work? This is the
-paper's Figure 5. The query vector for the newest token, "forth," still has to
-attend to every earlier token — but those tokens now live in three separate,
-non-contiguous physical blocks. The PagedAttention kernel just fetches each
-block on its own, computes a partial attention score against it, and combines
-the partial results at the end — that's the paper's Equation 4, block-by-block
-attention instead of one contiguous sweep. Non-contiguous memory stops being a
-problem the moment your kernel is written to expect it.
+Beat 3 — A block is K and V for B tokens
+Zoom in on one block. Each slot is not a word — it is that token's Key
+vector and Value vector, the pair we sized at 800 kilobytes per token in the
+KV-cache scene. One block holds B of those pairs, packed left to right. The
+paper writes K sub j for the keys of block j and V sub j for its values. The
+last block of a sequence may have empty slots; those are reserved for the
+tokens this request has not generated yet, and that is the only reservation
+we will allow: less than one block.
 
-Beat 4 — Decode walkthrough: prefill (Fig. 6)
-Let's walk through this exactly the way the paper does, step by step. Prompt:
-"Four score and seven years ago our fathers," eight tokens. Step ①, prefill, packs the first
-four tokens, "Four score and seven," into logical block 0, which lands on
-physical block 7; the remaining four tokens, "years ago our fathers," go into logical
-block 1 on physical block 1. The block table now
-has two rows: logical 0 to physical 7, four filled; logical 1 to physical 1,
-four filled.
+Beat 4 — Attention as we left it (Eq. 3)
+Now the computation. Recall Equation 3 from the transformer scene. The
+query for the newest token — here, "forth" — is dotted with every key to
+get a score. Softmax turns the scores into weights: each exponentiated
+score divided by the sum of all of them. Then the output is the weighted sum
+of every value. Look at the two sums. Both run over every previous token,
+one through i. That single long sum is the reason existing kernels wanted
+K and V as one contiguous matrix each: one pass, one pointer, one stride.
 
-Beat 5 — Step ② — block table grows
-First decode step generates "brought." Logical block 1 is completely
-full, so vLLM allocates a brand-new logical block 2, mapped to a fresh physical
-block 3, and adds a new row to the block table. This is the only moment a new
-block ever gets allocated: exactly when the previous one is completely full.
+Beat 5 — The same sums, grouped by block (Eq. 4)
+Here is the whole trick, and it is arithmetic you learned in primary school:
+addition does not care how you group the terms. Split the sum over tokens
+into a sum over blocks of a sum within each block. Per block j, the query
+times that block's keys gives a small vector of scores, A sub i j. The
+softmax denominator is the sum of the exponentiated scores across all the
+blocks. And the output is the sum over blocks of V sub j times A sub i j.
+That is Equation 4. Nothing was approximated. It is the same attention,
+computed one block at a time and accumulated.
 
-Beat 6 — Step ③ — fill the new block
-Second decode step generates "forth," landing in physical block 3 right next to
-"brought" — filled count ticks from one to two.
+Beat 6 — Fig. 5: fetch a block, score it, accumulate
+Figure 5, run live. The query is "forth". Its keys and values live in three
+blocks that are not next to each other in memory — Block 1, Block 2, Block 0,
+in that physical order. The kernel keeps two running totals: the softmax
+denominator, and the value-weighted numerator. It fetches Block 0 — "Four
+score and seven" — multiplies the query against those four keys, exponentiates,
+adds the four numbers into the denominator, and adds the four weighted values
+into the numerator. [PAUSE] Illustrative numbers, of course. But watch the
+pattern: one block in, two totals updated, nothing else touched.
 
-Beat 7 — The punchline on waste
-Notice the pattern: at any
-moment, at most one block per request is partially empty. Everything else is
-either completely full or not yet allocated. That's why the paper measures up
-to 96.3% of KV cache memory actually holding real token state — remember that
-question mark from the waste chart earlier? This is the answer.
+Beat 7 — Blocks 1 and 2, then divide
+Block 1: "years ago our fathers". Same operation; the totals grow. Block 2
+has only two tokens, "brought" and "forth" — the kernel handles the partial
+block by reading its fill count. Totals grow again. Now divide numerator by
+denominator, and that is o, the attention output for this step. Exactly what
+Equation 3 would have produced. The kernel fetched three blocks from three
+unrelated addresses and never needed them to be adjacent. That is
+PagedAttention. It costs a lookup per block — we will quantify that cost
+later — and it buys the freedom to put blocks anywhere in GPU memory.
 
-Beat 8 — Two requests at once (Fig. 7)
-None of this is special to one request. Here's Request B, "it was the best of
-times," arriving while Request A is still running. Its logical blocks land on
-physical blocks 2 and 4 — completely interleaved with Request A's blocks 7, 1,
-and 3. Blocks 0, 5, and 6 are still sitting free, available to whichever
-request needs them next. Physical layout has nothing to do with logical order
-anymore.
+Beat 8 — So who decides where blocks live? The KV cache manager
+If the kernel can read a block from anywhere, someone has to decide where
+each block goes. That is the KV cache manager, and it has three parts.
+On the left, the request's own view: a series of logical blocks, filled from
+left to right as tokens arrive, always contiguous from the request's point
+of view. On the right, GPU memory: one large allocation carved into
+fixed-size physical blocks, a pool that every request draws from on demand.
+In the middle, the piece that connects them: a block table, one per request,
+with one row per logical block, recording which physical block it lives in
+and how many slots are filled. This layout stays on screen while we run a
+request through it.
 
-Beat 9 — Freeing blocks
-When a request finishes, every physical block it was using goes straight back
-to the free pool — instantly, no matter where in memory those blocks happened
-to be. There's no need to find a same-sized contiguous hole for the next
-request, because blocks are always the same fixed size. That's external
-fragmentation eliminated entirely; the only fragmentation left is at most one
-partial block per live request.
+Beat 9 — Fig. 6, step ①: prefill
+The paper reuses our sentence but starts the prompt at "our", so we can
+watch two words get generated. Seven tokens: "Four score and seven years ago
+our". vLLM does not reserve two thousand and forty-eight slots. It reserves
+exactly the blocks the prompt needs: two. Logical block 0 gets the first
+four tokens and is mapped to physical block 7. Logical block 1 gets the
+remaining three and is mapped to physical block 1. Three of four filled; the
+last slot is reserved for generation. Prefill itself runs ordinary
+self-attention — every prompt token is known, so there is nothing to page —
+and the resulting K and V are written into blocks 7 and 1.
 
-Beat 10 — Recap
-So: fixed-size blocks, a block table mapping logical to physical, allocation
-only on demand, and a kernel built from the ground up to read scattered blocks
-and combine the results. Four ideas, and together they take KV cache
-utilization from roughly 20 to 40 percent up to 96.3%.
+Beat 10 — Step ②: first decode, no new block
+First decode step. The query is the newest token. PagedAttention runs over
+physical blocks 7 and 1 — exactly the block-by-block loop from Figure 5 —
+and the model emits "fathers". Where does its K and V go? The last logical
+block still has a free slot, so it goes there. The block table's fill count
+ticks from three to four. No new physical block. Nothing else moved.
 
-## S6 S6OSAndWhyHard (~4-5 min)
+Beat 11 — Step ③: the last block is full — allocate
+Second decode step. Logical block 1 is full, so vLLM opens logical block 2,
+asks the pool for any free physical block — it gets physical 3 — and stores
+"brought" there. The block table gains a row: logical 2 maps to physical 3,
+one filled. This is the only moment memory is allocated: when every
+previous block is completely full, and then exactly one block. Compare that
+to S4, where the whole two thousand and forty-eight slots were claimed
+before the first token.
+
+Beat 12 — One more step, and you have seen this picture
+One more decode: "forth" lands in the second slot of physical block 3, and
+the fill count goes to two. Now look at the three physical blocks this
+request is using, top to bottom: block 1 holds "years ago our fathers",
+block 3 holds "brought forth", block 7 holds "Four score and seven". That is
+Figure 5. The scattered blocks the kernel was reading in Beat 6 are simply
+the state the manager arrives at by allocating on demand. The algorithm and
+the manager are two halves of one design.
+
+Beat 13 — All waste, less than one block
+Put S4's picture and this one side by side. Same ten tokens. S4: ten slots
+used, two thousand and thirty-eight reserved and never used — internal
+fragmentation, plus a reserved run, plus external holes between chunks.
+vLLM: ten slots used, two slots empty in the last block. Because blocks are
+filled left to right and a new one is allocated only when all previous
+blocks are full, all memory waste for a request is confined to less than
+one block. [PAUSE] Remember the question mark on the Figure 2 chart? Here is
+the answer. Existing systems: 20.4 to 38.2 percent of KV memory holding real
+token state. vLLM: 96.3 percent. Same model, same GPU.
+
+Beat 14 — Fig. 7: a second request shares the pool
+None of this is special to one request. Request B arrives: "it was the best
+of times". Its logical block 0 is mapped to physical 5; its partial logical
+block 1 to physical 2. Look at the pool now: A's blocks at 7, 1, 3 and B's
+at 5, 2, interleaved. Neighboring logical blocks of either request are not
+adjacent in GPU memory, and it does not matter. Because every physical block
+is the same size, any free block fits any request. There is no such thing as
+a hole that is too small.
+
+Beat 15 — A finishes: blocks return to the pool
+Request A finishes. Its three physical blocks — 7, 1, and 3 — go straight
+back to the free pool, wherever they sat. Request B is untouched. Six blocks
+are free, and every one of them is usable by whoever comes next, without
+finding a contiguous hole and without compaction. External fragmentation has
+nothing to fragment.
+
+Beat 16 — One iteration of the engine
+Zooming out, here is what vLLM does on every single decode iteration.
+First, pick which sequences to run this step — that is the scheduler, and
+we will spend a scene on it. Second, allocate physical blocks for any
+logical blocks that became necessary. Third, concatenate the current tokens
+of all those requests into one flat sequence: the whole prompt for a request
+in prefill, one token for each request in decode. Fourth, run the model once
+over that sequence; the attention layers use PagedAttention to read each
+request's blocks through its block table, and the new keys and values are
+written into their assigned physical blocks. One forward pass serves every
+request in the batch — the batching payoff from Act I, now with a batch that
+fits.
+
+Beat 17 — Landing
+So, two halves. A kernel that computes attention one block at a time, so
+blocks need not be contiguous. A manager that therefore places blocks
+anywhere, on demand, through a per-request block table. Together they take
+KV-cache utilization from roughly twenty to forty percent up to 96.3
+percent. [PAUSE] Next scene: look at this picture once more — logical
+blocks, a table, physical blocks. It should look very familiar.
+
+## S6 S6OSAndWhyHard
 
 ---------
-Beat 1 — The reveal.
-Look at what we just built: logical blocks for a request, a block table that
-maps them to physical slots, and a pool of physical blocks on the GPU. [PAUSE]
-Take a step back and squint at this picture. Logical blocks that get mapped,
-on demand, onto scattered physical blocks through a table... this is exactly
-what an operating system does when it manages a process's memory. We just
-reinvented virtual memory paging — for the KV cache.
+Beat 1 — Pickup.
+Look at what we just built. Same Lincoln sentence, same mapping as the last
+scene. Logical 0 lives in physical 7. Logical 1 in physical 1. Logical 2 in
+physical 3. A request, a block table, a pool of GPU blocks. Sit with this
+picture — we are going to look at it again. [PAUSE]
 
-Beat 2 — The same picture, OS vocabulary.
-Same picture, new labels. What we called a block, the OS calls a page. What
-we called a token, the OS calls a byte. What we called a request, the OS
-calls a process. And our block table is just a page table, mapping a
-process's virtual pages onto physical RAM. It's the same idea, one layer
-lower in the stack.
+Beat 2 — The reveal.
+Take a step back and squint. Logical blocks mapped, on demand, onto
+scattered physical blocks through a table... this is exactly what an
+operating system does when it manages a process's memory. We just
+reinvented virtual memory paging — for the KV cache. [PAUSE]
 
-Beat 3 — Paging, for anyone who skipped the OS class.
-Here's the whole idea in one breath: every process gets to believe it has
-one big, contiguous chunk of memory. Underneath, the page table quietly
-scatters that memory across whatever physical frames happen to be free.
-Frames get handed out only when the process actually touches that page — not
-up front — so there's no need to reserve a giant contiguous region, and no
-external fragmentation between processes.
+Beat 3 — OS vocabulary.
+Same picture, new labels. A block is a page. A token is a byte. A request
+is a process. And the block table is a page table: virtual pages onto
+physical frames. Same idea, one layer lower in the stack. [PAUSE]
 
-Beat 4 — So was this just copying the OS?
-So, fair question: did we just copy fifty-year-old operating systems ideas
-onto a GPU and call it a paper? [PAUSE] No. The idea transfers, but making it
-work on a GPU, for attention, required real systems work that a textbook page
-table never has to do.
+Beat 4 — Demand paging, shown.
+The process believes it has one contiguous chunk — pages 0, 1, 2 in order,
+on the left. Underneath, those pages sit in whatever frames were free: 7,
+1, and 3, not next to each other. Frames are handed out when the process
+actually touches them, not reserved up front. No giant slab. No external
+fragmentation. [PAUSE]
 
-Beat 5 — Reason one and two: no MMU, and the kernel itself changes.
+Beat 5 — The question.
+So, fair question. Did we just copy fifty-year-old operating systems ideas
+onto a GPU and call it a paper? Sit with that. [PAUSE]
+
+Beat 6 — The answer.
+The idea transfers. The engineering does not. Making paging work on a GPU,
+for attention, required real systems work that a textbook page table never
+has to do. Two reasons. We will take them one at a time.
+
+Beat 7 — No GPU MMU.
 First: your CPU has dedicated hardware for this — a memory management unit
-that walks page tables and a TLB that caches recent translations, all in
-silicon, off the critical path. The GPU has none of that for our purposes;
-vLLM does every logical-to-physical translation in software, inside the
-kernel, on every access. Second, and bigger: an OS page fault handler never
-touches your program's computation — it just finds the page and hands control
-back. Here, the computation *is* the memory access. The attention kernel
-itself had to be rewritten to gather scattered KV blocks fast: a fused
-reshape-and-write kernel, a fused block-read-and-attention kernel, and a
-fused block-copy kernel for copy-on-write.
+and a TLB, in silicon, off the critical path. The GPU has none of that for
+our purposes. Every logical-to-physical translation happens in software,
+inside the kernel, on every access. This table is walked by the kernel
+itself. [PAUSE]
 
-Beat 6 — Reason three and four: this isn't a rare fault, and OS policy doesn't fit.
-Third: a page fault is a rare event — maybe once every few thousand
-instructions. Our "fault" happens on *every token, every step*: attention
-reads every block, every time. That's why the PagedAttention kernel itself
-runs about 20 to 26 percent slower than FasterTransformer's kernel on
-contiguous memory — Figure 18(a) in the paper. And yet the end-to-end system
-is 2 to 4 times faster, because the memory efficiency gain swamps that
-per-kernel cost. [PAUSE] Fourth: the OS doesn't know our workload. We needed
-domain-specific policies it never had — all-or-nothing eviction of a whole
-sequence's blocks at once, gang-scheduling sequences that share blocks, and
-tuning the block size itself. More on those shortly.
+Beat 8 — The kernel is the pager.
+Second: an OS page-fault handler never touches your program's computation.
+It finds the page and hands control back. Here the computation is the
+memory access. The attention kernel had to be rewritten to gather those
+scattered KV blocks and attend in one fused pass. An OS pager never
+rewrites your program. [PAUSE]
 
-Beat 7 — Landing.
+Beat 9 — The kernel is slower.
+And that rewrite is not free. A page fault is rare. Ours happens on every
+token, every step: attention reads every block, every time. That's why the
+PagedAttention kernel itself runs about 20 to 26 percent slower than
+FasterTransformer's kernel on contiguous memory. [PAUSE]
+
+Beat 10 — And yet.
+And yet the end-to-end system is 2 to 4 times faster. Leftover VRAM now
+holds a bigger batch. The memory win swamps the per-kernel cost. We will
+measure that kernel overhead after the results. [PAUSE]
+
+Beat 11 — Landing.
 So: an OS idea, re-engineered for a workload the OS was never designed for.
+A new kernel. New policies still to come — because every block of a
+sequence is always touched together, and OS-style per-page eviction does
+not apply.
 
-Beat 8 — Checkpoint.
-
-## S7 S7Sharing (~5 min)
+## S7 S7Sharing
 
 ---------
-Beat 1 — Parallel sampling, the setup.
-A common trick for better outputs: take one prompt and sample several
-completions from it — "give me 2 tries at an answer." Each sample, call them
-A1 and A2, is really its own sequence with its own KV cache. But they all
-start from the exact same prompt. [PAUSE] In a contiguous-memory system,
-that means copying the prompt's entire KV cache once per sample. With
-blocks, we don't have to.
+Beat 1 — Pickup.
+Look at the mapping we just built. Same Lincoln sentence: logical 0 lives in
+physical 7, logical 1 in physical 1, logical 2 in physical 3. Figure 7 put a
+second request into that same pool — interleaved, not shared. Two sequences
+still owned two copies of everything. [PAUSE] Act I already named the bill:
+a contiguous KV cache cannot point two sequences at the same physical
+memory. Prompt copies were 12 percent of the cache. Beam search could save
+up to 55 percent. We now have a block table. We can pay that bill.
 
-Beat 2 — Same physical blocks, two logical views.
-Here's Figure 8 from the paper. A1's block table and A2's block table both
-map their logical blocks 0 and 1 to the *same* physical blocks. No copy has
-happened — both samples are just pointers into one shared region. Each
-shared physical block carries a reference count: here, 2, because two
-logical blocks point at it.
+Beat 2 — Parallel sampling, the product.
+A common trick for better outputs: one prompt, several tries. "Give me two
+samples." Call them A1 and A2. Each is its own sequence with its own KV
+cache, but they start from the exact same prompt. [PAUSE] In a contiguous
+system that means copying the prompt's entire KV cache, once per sample.
+With blocks, we rewind to just after prefill — and we do not copy.
 
-Beat 3 — Copy-on-write.
-Block 0 is completely full — four out of four prompt tokens — so nobody
-ever needs to write to it again; it can stay shared forever. Block 1 is
-different: it still has one open slot. When A1 generates its next token and
-tries to write into that slot, vLLM checks the reference count, sees it's 2,
-and refuses to write in place. Instead: allocate a fresh physical block,
-copy the old block's contents into it, write A1's new token into the copy,
-and decrement the original block's count to 1. [PAUSE] A2 keeps using the
-original block, untouched. Notice the cost: only that *last*, not-yet-full
-block is ever copied. Every earlier, fully-packed block just stays shared.
+Beat 3 — Same physical blocks, two logical views.
+Figure 8. A1's block table and A2's block table both map logical 0 to
+physical 7 and logical 1 to physical 1. No copy has happened — both samples
+are pointers into one shared region. Each shared physical block carries a
+reference count: here, 2, because two logical blocks point at it.
 
-Beat 4 — Beam search shares a tree.
-Beam search shares even more aggressively. Multiple candidate beams don't
-just share the prompt — they share prefixes of each other's generated
-tokens too, because at every step they're extensions of a shared history.
-Picture it as a tree: one shared trunk, branching into candidates, each
-candidate touching only the new blocks it needed to extend the sequence.
+Beat 4 — Only the last block can move.
+Physical 7 is packed. Four out of four prompt tokens. Nobody ever writes
+there again, so it can stay shared forever. Physical 1 is different: one
+open slot, reserved for the next token. That is the only place a write can
+happen. [PAUSE]
 
-Beat 5 — And it changes every step.
-Now watch what happens when a candidate falls out of the top-k and gets
-dropped. Every physical block that only it was using has its reference
-count drop to zero — and those blocks go straight back to the free pool,
-instantly, without any bulk copy. [PAUSE] The sharing pattern is being
-recomputed, cheaply, at every single decoding step.
+Beat 5 — Copy-on-write.
+A1 samples a different continuation and tries to write "mothers" into that
+open slot. vLLM checks the reference count, sees 2, and refuses to write in
+place. Allocate a fresh physical block — physical 3 — copy the three shared
+tokens into it, write "mothers" into the copy, retarget A1's table, and
+decrement the original block's count to 1. [PAUSE] A2 still points at the
+original, untouched. The cost: only that last, not-yet-full block is copied.
+Every packed block just stays shared.
 
-Beat 6 — Shared prefix / system prompt.
-This same trick shows up in production systems today: a fixed instruction
-or a handful of few-shot examples that every request in a workload shares.
+Beat 6 — Write in place.
+Now A2 writes "fathers" into the original block. The reference count is
+already 1, so the write happens in place. No copy. [PAUSE] This is the same
+trick an operating system uses when you fork a process: share the pages,
+copy only the one that someone actually writes. Two samples, one prompt's
+worth of KV, plus a single last-block copy.
+
+Beat 7 — Beam search shares a tree.
+Beam search uses the same mechanism more aggressively. A beam of width 4
+keeps four candidate sequences at every step. They do not just share the
+prompt — they share prefixes of each other's generated tokens, because
+every candidate is an extension of a shared history. Picture a tree: one
+shared trunk, a private branch for the candidate that diverged early, and
+four live heads. Each head is only the new block that candidate needed.
+
+Beat 8 — One prune step.
+Watch the next iteration. Candidates 0 and 3 fall out of the top 4. Every
+physical block that only they were using has its reference count drop to
+zero — and those blocks go straight back to the free pool, with no bulk
+copy. New blocks are allocated for the surviving heads. [PAUSE] The sharing
+pattern is being recomputed, cheaply, at every single decoding step. This
+is the case that can save up to 55 percent of KV memory. We will measure
+that in the results.
+
+Beat 9 — Shared prefix, the paper's example.
+Same trick, now across different requests. A production translation service
+ships the same few-shot instruction with every call: "Translate English to
+French," plus three examples — sea otter, peppermint, plush giraffe.
+Sequence A asks for "cheese?" and gets "fromage." Sequence B asks "I love
+you?" and gets "Je t'aime." Look at how much of each request is identical.
+[PAUSE]
+
+Beat 10 — Cached blocks, two tables.
 vLLM computes that shared prefix's KV blocks exactly once, caches them, and
-every new request's block table just points at those cached blocks. Only
-the request-specific suffix — the actual question — needs new computation
-and new blocks.
+every new request's block table just points at those cached blocks. The
+last shared block is marked copy-on-write. Only the task-specific suffix —
+the actual question — needs new computation and new blocks.
 
-Beat 7 — What it's worth.
-On the paper's numbers: parallel sampling saves 6.1 to 9.8 percent of memory
-on Alpaca, and 16.2 to 30.5 percent on ShareGPT. Beam search saves far more
-— 37.6 to 55.2 percent on Alpaca, 44.3 to 66.3 percent on ShareGPT. [PAUSE]
-None of this is possible in a contiguous-memory system — there, "sharing" a
-block would mean the copies have to physically exist somewhere, defeating
-the point.
+Beat 11 — Three primitives.
+None of this is three special features. The engine exposes three operations.
+Fork: create a new sequence from an existing one, share its blocks, bump
+the reference counts. Append: write a new token; copy-on-write if the block
+is still shared. Free: drop a sequence, decrement, reclaim at zero.
+Parallel sampling is fork then append. Beam search is fork, append, and
+free, every step. A shared prefix is a fork onto a cache that was computed
+once. One API.
 
-Beat 8 — Landing.
-Two small mechanisms — reference counts and copy-on-write — turn a memory
-layout trick into free, automatic sharing across requests.
+Beat 12 — Landing.
+Reference counts and copy-on-write pay Act I's bill: sequences can now
+point at the same physical memory. Next: what happens when that free pool
+is empty.
 
-## S8 S8Scheduling (~4 min)
-
----------
-Beat 1 — The vLLM system overview (Fig 4).
-Zoom out to how vLLM is actually organized. A central Scheduler decides which
-requests run in each step. It talks to a KV Cache Manager, which is the one
-place that owns every block table in the system — logical block to physical
-block, for every request. Underneath, a CPU Block Allocator and a GPU Block
-Allocator hand out physical blocks on each side. And on the right, a row of
-Workers — Worker 0 through Worker N-1 — each on its own GPU, each running a
-shard of the model plus a Cache Engine that moves blocks around exactly when
-the scheduler tells it to. [PAUSE] One brain, many hands.
-
-Beat 2 — Running out of room.
-In normal operation this is boring: requests arrive, the scheduler admits
-them, blocks get allocated on demand as each one generates tokens, and the
-batch grows. But GPU memory is finite, so eventually the free block pool runs
-dry — some request's next token needs a new block, and there isn't one.
-[PAUSE] Which request gives up its memory, and what do we do with it?
-
-Beat 3 — Policy: first-come, first-served.
-vLLM's answer is deliberately simple: first-come, first-served, with
-preemption. Requests are served oldest-first; when the scheduler must free
-space, it preempts the most recently arrived request first. That guarantees
-no request starves waiting behind an endless stream of newer arrivals — the
-one that's been running longest is the last one ever kicked out.
-
-Beat 4 — All-or-nothing eviction.
-Here's a detail that only makes sense once you remember how attention works:
-every generated token reads every block of a sequence, every single step. So
-evicting half a sequence's blocks buys you nothing — the sequence still can't
-run without the other half. vLLM evicts a sequence's blocks all at once, and
-if several sequences share blocks — say, all the beams of one request — the
-whole gang goes together. An OS, by contrast, happily evicts individual
-pages one at a time, because a process only touches a handful of them per
-instruction.
-
-Beat 5 — Recovery option 1: swapping.
-Once a sequence is preempted, vLLM needs to get its blocks out of the way
-without losing them, and there are two ways to do that. The first is
-swapping: the CPU block allocator copies the evicted blocks into ordinary CPU
-RAM, over PCIe, and swaps them back in later when the request is
-rescheduled. The cost is PCIe bandwidth. And notice the swap space can never
-grow unbounded — it's capped by exactly the GPU's total KV block capacity,
-since that's the most that could ever be evicted at once.
-
-Beat 6 — Recovery option 2: recomputation.
-The second option is more radical: just drop the evicted blocks entirely.
-When the request is rescheduled, concatenate its original prompt with all
-the tokens it had already generated, and treat that whole thing as one new
-prompt — run a single prefill pass over it. That rebuilds the entire KV
-cache in one parallel pass instead of one slow token at a time, so it's
-often cheaper than it sounds.
-
-Beat 7 — So which one wins? [PAUSE]
-It depends on block size. In the paper's microbenchmark, recomputation's
-overhead is essentially flat no matter the block size — it never touches a
-KV block. Swapping is expensive at small block sizes, because it means many
-tiny PCIe transfers, but gets cheaper as blocks get larger and transfers get
-bigger. They cross over somewhere in the medium range, roughly block size 16
-to 64, where end-to-end performance is comparable either way. These numbers
-are approximate, read off the paper's Figure 19.
-
-Beat 8 — Landing.
-Put together, this is the payoff of paging: preemption, all-or-nothing
-eviction, swap, recompute — none of that exists in a system where memory is
-one fixed contiguous slab per request. Paging gives you a knob the
-contiguous systems never had: you can take memory back, and give it back
-later.
-
-## S9 S9Results (~4-5 min)
+## S8 S8Scheduling
 
 ---------
-Beat 1 — Setup.
-We evaluated vLLM on OPT-13B, 66B and 175B, and on LLaMA-13B, on real
-Google Cloud A100 servers — one A100 for 13B, four for 66B, eight 80GB
-A100s for 175B. The baselines are FasterTransformer, NVIDIA's
-latency-optimized serving engine, and three re-implemented variants of
-Orca: Oracle, which cheats by knowing each request's true output length in
-advance; Pow2, which rounds its reservation up to the next power of two;
-and Max, which always reserves the model's full 2048-token maximum.
-[PAUSE] The metric is normalized latency — latency per output token —
-plotted against request rate. A system is "better" if it keeps latency flat
-out to a higher request rate before it falls over.
+Beat 1 — Pickup: request A.
+Look at leftover VRAM — the slice we have been spending all talk. Request A
+is live. Four blocks, scattered, allocated on demand. Three still free.
+Paging put those blocks wherever there was room. Sit with this picture.
+[PAUSE]
 
-Beat 2 — Two workloads.
-We test on two datasets with very different shapes. ShareGPT — real
-multi-turn chat logs — averages 161 tokens of input and 338 tokens of
-output. Alpaca — short instruction-following prompts — averages only 19
-tokens in and 58 out. That makes ShareGPT's prompts 8.4 times longer and
-its outputs 5.8 times longer than Alpaca's, which means ShareGPT puts far
-more pressure on the KV cache.
+Beat 2 — Request B joins.
+Request B draws from the same pool. Its blocks sit interleaved with A's —
+not a contiguous slab, just whatever was free. Sharing from last scene
+packed this leftover even tighter. Three slots remain. The GPU is fuller
+than it has ever been in this talk. It is still finite.
 
-Beat 3 — The headline result.
-Here's OPT-13B on both datasets: normalized latency versus request rate.
-Every system is flat at low request rate, then hits a knee and blows up as
-queueing delay takes over. vLLM's knee sits far to the right of everyone
-else's. On ShareGPT, vLLM sustains 1.7 to 2.7 times the request rate of
-Orca (Oracle) and 2.7 to 8 times that of Orca (Max), at the same latency —
-and up to 22 times FasterTransformer. [PAUSE] Same model, same GPU, just
-better memory management.
+Beat 3 — C fills the leftovers.
+A third request arrives. Any free block fits anyone, so C lands in those
+three leftover slots, interleaved with A and B. The pool is full. We have
+now admitted more work than we can finish if everyone keeps growing.
+[PAUSE]
 
-Beat 4 — Why: more requests fit in the batch.
-Here's the mechanism underneath that curve. At a fixed request rate, we
-counted how many requests are actually batched together at once. On
-ShareGPT, vLLM batches 30 requests on average versus Orca (Oracle)'s 13.6
-— 2.2 times more. On Alpaca, with its shorter sequences, vLLM batches 132
-versus Orca (Max)'s 7. More requests batched per GPU pass is exactly
-the memory savings from Act II showing up as throughput.
+Beat 4 — This picture is new.
+Contiguous systems never faced this. They reserved two thousand and
+forty-eight slots the moment a request arrived — the model's maximum —
+so they never ran out mid-decode. They bounced new work at the door.
+Paging created the ability to overcommit. That is why we suddenly need
+a policy for taking memory back.
 
-Beat 5 — Callback: the waste bars, closing the loop.
-Remember this chart from Act I? Orca (Max) actually stores tokens in only
-20.4% of its reserved KV memory; Orca (Pow2), 26.8%; Orca (Oracle), even
-knowing the future, only 38.2%. vLLM: 96.3%. [PAUSE] That's the whole
-story of this talk in one bar chart — turning wasted reservation into
-actual throughput.
+Beat 5 — The pool runs dry.
+A generates another token and needs one more block. There isn't one.
+[PAUSE] Which request gives up its memory? And what do we do with it?
 
-Beat 6 — Harder decoding: parallel sampling and beam search.
-Complex decoding makes memory sharing even more valuable, and vLLM's
-advantage grows with it. On Alpaca with OPT-13B, going from plain sampling
-to beam search of width 6, vLLM's edge over Orca (Oracle) widens from 1.3
-times to 2.3 times — because more candidates sharing memory means more for
-vLLM's block-level sharing to exploit.
+Beat 6 — Name the scheduler.
+The answer starts with a job. Someone has to pick who runs this step,
+and who gives up space when the pool is empty. That is the scheduler.
+We will watch it work.
 
-Beat 7 — Why: memory actually saved by sharing.
-Directly measuring the KV blocks vLLM shares instead of duplicating: on
-Alpaca, parallel sampling saves 6.1 to 9.8% of memory, and beam search
-saves 37.6 to 55.2% — beam search shares far more because candidates share
-almost their whole prefix. On ShareGPT, with its longer sequences, sharing
-is even bigger: 16.2 to 30.5% for parallel sampling, 44.3 to 66.3% for beam
-search.
+Beat 7 — Preempt the newest.
+The policy is deliberately simple: first-come, first-served, with
+preemption. Serve oldest first. When someone has to leave, evict the
+newest arrival — here, C. A has been running longest, so A is the last
+request we ever kick. A stream of new arrivals cannot starve the ones
+already on the GPU. [PAUSE]
 
-Beat 8 — Shared prefixes: translation.
-One more sharing case: a common system prompt shared across every request.
-For LLaMA-13B doing English-to-German translation with a few-shot prefix,
-vLLM gets 1.67 times the throughput of Orca (Oracle) with a short, one-shot
-prefix, and 3.58 times with a longer, five-shot prefix — the more prefix
-there is to share, the bigger vLLM's advantage.
+Beat 8 — Try taking half.
+Suppose we only take two of C's three blocks, so A can continue. A
+gets a block. One of C's blocks is free. One is still C's. Sit with
+that leftover. [PAUSE] Every decode step reads every block of a
+sequence — that is why the PagedAttention kernel walks the whole table,
+every token. C cannot run on one leftover block. Those two freed blocks
+bought A a step and stranded C.
 
-Beat 9 — A harder case: chatbot.
-Now the least favorable setting: a chatbot workload with long, truncated
-1024-token prompts on ShareGPT-style multi-turn conversations. vLLM still
-sustains about 2 times the request rate of the Orca baselines — but notice
-the three Orca variants now cluster together. With prompts this long, there
-just isn't much slack left for any reservation strategy to get right, so
-Oracle, Pow2, and Max converge.
+Beat 9 — All or none.
+Put them back. The rule is all of C's blocks, or none of them. An
+operating system will happily evict a single page. We cannot. That is
+the policy the OS scene promised: every block of a sequence is always
+touched together. [PAUSE]
 
-Beat 10 — Summary.
-Across every workload we tried, vLLM delivers 2 to 4 times the throughput
-of Orca at the same latency, and up to 22 times FasterTransformer's — with
-zero changes to the model itself. [PAUSE] All of that came from managing
-memory better.
+Beat 10 — Sequence groups.
+And if C were two beam candidates sharing a trunk — the copy-on-write
+picture from last scene — kicking only one of them would strand the
+shared blocks. Reference count two: both still need that memory. So
+the scheduler treats a sequence group as one unit. Beams of the same
+request are gang-preempted, and gang-resumed, together. Sharing couples
+their lifetimes.
 
-## S10 S10Ablations (~2 min)
+Beat 11 — The other pool.
+C is leaving. Before we move anything: remember the two memory pools
+from the GPU scene. GPU VRAM, and ordinary CPU RAM, joined by PCIe —
+the slow bridge. Swap space lives on that other side. Watch it appear.
+[PAUSE]
+
+Beat 12 — Swap.
+Copy C's blocks across the bridge. GPU slots empty. A takes one and
+continues. Swap space cannot grow forever. It is capped at the GPU's
+total KV capacity, because that is the most we could ever evict at
+once. The cost is PCIe bandwidth.
+
+Beat 13 — Or drop, keep the tokens.
+Or we do something an OS almost never does: throw the KV cache away.
+Undo the copy. Drop C's blocks. Keep the tokens — the original prompt,
+plus whatever C had already generated. The words are cheap. The cache
+was the expensive object. [PAUSE]
+
+Beat 14 — One prefill.
+When C is rescheduled, concatenate those tokens and treat the whole
+string as one new prompt. One prefill pass rebuilds the entire cache
+in parallel, not one slow decode step at a time.
+
+Beat 15 — Fig. 4, and the knob.
+Zoom out. Same three jobs we just watched. The scheduler picks who
+runs and who is preempted. It talks to a KV cache manager that owns
+every block table — and under that, a GPU allocator for the leftover
+pool, and a CPU allocator for the swap strip. Workers, one GPU each,
+run the step they are told to run. Contiguous slabs had no way to
+take memory back. Paging is the knob.
+
+## S9 S9Results
+
+---------
+Beat 1 — Setup (§6.1).
+Same models, same GPUs, Google Cloud A100 machines. OPT-13B on one A100,
+66B on four, 175B on eight 80-gigabyte A100s — Table 1 in the paper.
+LLaMA-13B is for the translation experiment later. The baselines are
+FasterTransformer, NVIDIA's latency-optimized engine, given a dynamic
+batching scheduler so the comparison is fair; and three re-implementations
+of Orca. Oracle cheats: it knows each request's true output length in
+advance — an infeasible upper bound. Pow2 over-reserves by up to two
+times. Max always reserves the model's 2048-token maximum. [PAUSE]
+The metric is normalized latency: each request's end-to-end latency
+divided by its output length, then the mean of that, plotted against
+request rate. A system is better if it keeps that number low out to a
+higher request rate. Arrivals are Poisson; traces are one hour, fifteen
+minutes for 175B because of cost.
+
+Beat 2 — Fig 1-right, the intro claim.
+Here is Figure 1 from page 1, the right panel — the claim the evaluation
+is about to measure. Existing systems: KV cache memory explodes with
+batch size and hits the 40-gigabyte wall. vLLM smooths that growth, so
+the batch can keep growing, and throughput keeps rising. The rest of
+this scene is section 6 putting numbers on that picture.
+
+Beat 3 — Fig 11, two workloads.
+Two datasets. ShareGPT is real multi-turn chat: input mean 161.31 tokens,
+output mean 337.99, long right tail out to two thousand. Alpaca is short
+instruction-following: input mean 19.31, output mean 58.45, a much
+sharper peak. ShareGPT's prompts are 8.4 times longer and its outputs
+5.8 times longer, with higher variance — more pressure on the KV cache.
+
+Beat 4 — Fig 12(a), OPT-13B ShareGPT.
+Figure 12: normalized latency versus request rate. Watch FasterTransformer
+fall over first, then Orca Max, Pow2, Oracle — and vLLM keeps going.
+On ShareGPT, vLLM sustains 1.7 to 2.7 times the request rate of Orca
+Oracle and 2.7 to 8 times Orca Max, at similar latency — and up to 22
+times FasterTransformer. [PAUSE] Same model, same GPU.
+
+Beat 5 — Fig 12 ShareGPT row, 13B / 66B / 175B.
+The same ranking at 66B and 175B. Every subplot, vLLM's knee sits furthest
+right. This is not a 13B trick.
+
+Beat 6 — Fig 12 Alpaca row, and the 12(f) exception.
+Alpaca, shorter sequences, same axes, higher request rates. Same ranking
+on 13B and 66B. Now 175B — panel (f). The paper's exception: vLLM's
+advantage over Oracle and Pow2 is less pronounced, because 175B has so
+much GPU memory and Alpaca's sequences are so short that the workload
+is less memory-bound. Memory management helps most when memory is the
+constraint. [PAUSE]
+
+Beat 7 — Fig 13, why the knee moved.
+Here is the mechanism, Figure 13, OPT-13B. Average number of requests
+actually in the batch. ShareGPT at 2 requests per second: Orca Max 7.00,
+Pow2 9.81, Oracle 13.62, vLLM 30.42 — 2.2 times Oracle, 4.3 times Max.
+Alpaca at 30 per second: 7.00, 43.24, 72.75, 132.44. More of leftover
+VRAM is real token state, so more requests fit in one pass. [PAUSE]
+
+Beat 8 — Fig 14, parallel sampling.
+Section 6.3. Parallel generation on Alpaca, OPT-13B — two, four, then
+six samples per prompt. No FasterTransformer here. Knees move left as
+you pay for more sequences, but vLLM's relative gap grows, because the
+samples share prompt blocks.
+
+Beat 9 — Fig 14, beam search.
+Beam search, width 2, 4, 6. Same story, more sharing. The paper's
+sentence: vLLM's improvement over Orca Oracle on OPT-13B and Alpaca
+goes from 1.3 times in basic sampling to 2.3 times at beam width 6.
+[PAUSE]
+
+Beat 10 — Fig 15, memory actually saved.
+Directly measuring the KV blocks shared instead of copied, Alpaca,
+OPT-13B. Parallel sampling: 6.09, 8.53, 9.79 percent. Beam search:
+37.56, 53.13, 55.16 percent — beam shares almost the whole prefix.
+On ShareGPT, with longer sequences, the paper saw 16.2 to 30.5 percent
+for parallel sampling and 44.3 to 66.3 percent for beam search.
+
+Beat 11 — Fig 16, shared prefix.
+LLaMA-13B, WMT16 English to German, a few-shot prefix shared across
+every request. One-shot, 80 tokens: vLLM 1.67 times the throughput of
+Orca Oracle. Five-shot, 341 tokens: 3.58 times. The more prefix there
+is to share, the bigger the win. [PAUSE]
+
+Beat 12 — Fig 17, chatbot.
+The least favorable case: a chatbot workload, ShareGPT-style multi-turn,
+prompt truncated to the last 1024 tokens, output capped at 1024, no KV
+kept across turns. The three Orca variants cluster — they all reserve
+about 1024 under buddy allocation, so Oracle, Pow2, and Max converge.
+vLLM still sustains about 2 times their request rate.
+
+Beat 13 — Landing.
+Across basic sampling, parallel sampling, beam search, shared prefix,
+and chatbot: 2 to 4 times the throughput of Orca at the same latency,
+up to 22 times FasterTransformer, no change to the model. Gains are
+larger with longer sequences, larger models, and more complex decoding —
+exactly what those figures showed. [PAUSE] Next: the kernel itself is
+slower. Section 7.
+
+## S10 S10Ablations
 
 ---------
 Beat 1 — The kernel itself is slower.
-Before we celebrate, let's be honest about the cost. PagedAttention's own
-attention kernel has to look up a block table and read key/value data from
-scattered, non-contiguous memory locations, instead of one clean contiguous
-strip. The paper measures this in isolation: across batch sizes and context
-lengths, vLLM's attention kernel runs about 20 to 26% slower than
-FasterTransformer's tightly hand-optimized kernel. [PAUSE] That's a real,
-measurable cost — but attention is only one operator in a whole forward
-pass, so this slowdown barely dents end-to-end latency.
+The OS scene already said it: PagedAttention's attention kernel is slower
+on its own. Here is the measurement. The kernel has to look up a block
+table and read key/value data from scattered, non-contiguous memory
+instead of one clean contiguous strip. Across batch sizes and context
+lengths, it runs about 20 to 26% slower than FasterTransformer's tightly
+hand-optimized kernel. [PAUSE] That's a real cost — but attention is only
+one operator in a whole forward pass, so this slowdown barely dents
+end-to-end latency.
 
 Beat 2 — Picking the block size.
 The other knob is block size: how many tokens live in one page. Make blocks
@@ -720,7 +916,7 @@ So the trade is explicit: a slightly slower attention kernel, in exchange
 for a dramatically better memory story. Net result, end to end: still that
 2 to 4 times throughput win we saw in the results.
 
-## S11 S11Takeaways (~1-2 min)
+## S11 S11Takeaways
 
 ---------
 Beat 1 — Three takeaways.

@@ -1,7 +1,8 @@
 # Brief for scene writers
 
-You are writing one or two scenes of a narrated Manim animation for a ~40-minute CS-club talk
-on the vLLM / PagedAttention paper (Kwon et al., SOSP '23). Read, in this order:
+You are writing one or two scenes of a narrated Manim animation for a CS-club talk
+on the vLLM / PagedAttention paper (Kwon et al., SOSP '23). There is no target
+duration — take the time the material needs; do not compress or rush. Read, in this order:
 
 1. `talk/CONTRACT.md` — runtime rules, file/class naming, beat counts, theme + component API.
 2. `TALK_PLAN.md` — the narrative spec. Your scene's paragraph under "Narrative + scene
@@ -20,13 +21,28 @@ Hard rules:
 - `apply_theme(self)` first line of `construct`. `self.next_slide()` between beats.
 - Every beat must leave a stable, legible, in-frame final frame (this is what the presenter
   stands on while talking). Keep on-screen text terse; the narration carries the words.
-- The module docstring must contain the NARRATION section (per beat, 2–5 spoken sentences,
-  `[PAUSE]` markers for audience interaction). Write it in a natural speaking voice for a
-  presenter addressing CS juniors + peers. Include the paper's exact numbers where relevant.
+- The module docstring must contain the NARRATION section (per beat, as many spoken
+  sentences as the idea needs — do not compress for time; `[PAUSE]` markers for
+  audience interaction). Write it in a natural speaking voice for a presenter addressing
+  CS juniors + peers. Include the paper's exact numbers where relevant.
 - Known cosmetic: `MemoryBar` labels for segments under ~10% get squished; for such segments
   pass `show_pct=False` or add your own `caption` text beside the bar.
 - `BlockTable.highlight_row` uses Indicate which may not fully revert color; follow with an
   explicit color reset if you need to.
+- **`AnimationGroup` z-order trap.** `AnimationGroup(cell.animate…, FadeIn(label))` wraps the
+  animated cells in a fresh `Group`; `Scene.play` adds that Group top-level, which pulls the
+  cells *above* their sibling labels — the labels then render underneath and vanish. Always
+  pass `group=<the parent already in the scene>` to `AnimationGroup` when its sub-animations
+  target children of an on-screen VGroup (see `_fill_slot` in `s5_pagedattention.py`).
+- **Text baseline trap.** `Text` centres on the glyph bounding box, so `move_to(cell)` puts
+  "and" (ascender), "ago" (descender) and "score" (x-height only) at three different
+  heights — a row of words looks ragged. Place short labels by baseline: measure the word
+  inside an `"Ág" + word + "Ág"` probe and shift by the offset (`_tx` / `_center` in
+  `s5_pagedattention.py`). Same reason: never `arrange(..., aligned_edge=LEFT)` rows whose
+  left-most item is a digit — `1` is narrower than `0` and the rows shift; lay out on a grid.
+- **Uniform label size.** Do not shrink-to-fit each word separately (`scale_to_fit_width`
+  per label): "fathers" ends up smaller than "our". Pick one font size per cell width that
+  fits the longest word (`_word_fs`) and use it for every cell in the row.
 
 Verification (mandatory before you report):
 1. `cd /Users/agrim/Home/PagedAttention && .venv/bin/manim-slides render -ql talk/<file>.py <Class>`

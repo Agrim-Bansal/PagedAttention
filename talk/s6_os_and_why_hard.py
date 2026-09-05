@@ -2,63 +2,69 @@
 
 NARRATION
 ---------
-Beat 1 — The reveal.
-Look at what we just built: logical blocks for a request, a block table that
-maps them to physical slots, and a pool of physical blocks on the GPU. [PAUSE]
-Take a step back and squint at this picture. Logical blocks that get mapped,
-on demand, onto scattered physical blocks through a table... this is exactly
-what an operating system does when it manages a process's memory. We just
-reinvented virtual memory paging — for the KV cache.
+Beat 1 — Pickup.
+Look at what we just built. Same Lincoln sentence, same mapping as the last
+scene. Logical 0 lives in physical 7. Logical 1 in physical 1. Logical 2 in
+physical 3. A request, a block table, a pool of GPU blocks. Sit with this
+picture — we are going to look at it again. [PAUSE]
 
-Beat 2 — The same picture, OS vocabulary.
-Same picture, new labels. What we called a block, the OS calls a page. What
-we called a token, the OS calls a byte. What we called a request, the OS
-calls a process. And our block table is just a page table, mapping a
-process's virtual pages onto physical RAM. It's the same idea, one layer
-lower in the stack.
+Beat 2 — The reveal.
+Take a step back and squint. Logical blocks mapped, on demand, onto
+scattered physical blocks through a table... this is exactly what an
+operating system does when it manages a process's memory. We just
+reinvented virtual memory paging — for the KV cache. [PAUSE]
 
-Beat 3 — Paging, for anyone who skipped the OS class.
-Here's the whole idea in one breath: every process gets to believe it has
-one big, contiguous chunk of memory. Underneath, the page table quietly
-scatters that memory across whatever physical frames happen to be free.
-Frames get handed out only when the process actually touches that page — not
-up front — so there's no need to reserve a giant contiguous region, and no
-external fragmentation between processes.
+Beat 3 — OS vocabulary.
+Same picture, new labels. A block is a page. A token is a byte. A request
+is a process. And the block table is a page table: virtual pages onto
+physical frames. Same idea, one layer lower in the stack. [PAUSE]
 
-Beat 4 — So was this just copying the OS?
-So, fair question: did we just copy fifty-year-old operating systems ideas
-onto a GPU and call it a paper? [PAUSE] No. The idea transfers, but making it
-work on a GPU, for attention, required real systems work that a textbook page
-table never has to do.
+Beat 4 — Demand paging, shown.
+The process believes it has one contiguous chunk — pages 0, 1, 2 in order,
+on the left. Underneath, those pages sit in whatever frames were free: 7,
+1, and 3, not next to each other. Frames are handed out when the process
+actually touches them, not reserved up front. No giant slab. No external
+fragmentation. [PAUSE]
 
-Beat 5 — Reason one and two: no MMU, and the kernel itself changes.
+Beat 5 — The question.
+So, fair question. Did we just copy fifty-year-old operating systems ideas
+onto a GPU and call it a paper? Sit with that. [PAUSE]
+
+Beat 6 — The answer.
+The idea transfers. The engineering does not. Making paging work on a GPU,
+for attention, required real systems work that a textbook page table never
+has to do. Two reasons. We will take them one at a time.
+
+Beat 7 — No GPU MMU.
 First: your CPU has dedicated hardware for this — a memory management unit
-that walks page tables and a TLB that caches recent translations, all in
-silicon, off the critical path. The GPU has none of that for our purposes;
-vLLM does every logical-to-physical translation in software, inside the
-kernel, on every access. Second, and bigger: an OS page fault handler never
-touches your program's computation — it just finds the page and hands control
-back. Here, the computation *is* the memory access. The attention kernel
-itself had to be rewritten to gather scattered KV blocks fast: a fused
-reshape-and-write kernel, a fused block-read-and-attention kernel, and a
-fused block-copy kernel for copy-on-write.
+and a TLB, in silicon, off the critical path. The GPU has none of that for
+our purposes. Every logical-to-physical translation happens in software,
+inside the kernel, on every access. This table is walked by the kernel
+itself. [PAUSE]
 
-Beat 6 — Reason three and four: this isn't a rare fault, and OS policy doesn't fit.
-Third: a page fault is a rare event — maybe once every few thousand
-instructions. Our "fault" happens on *every token, every step*: attention
-reads every block, every time. That's why the PagedAttention kernel itself
-runs about 20 to 26 percent slower than FasterTransformer's kernel on
-contiguous memory — Figure 18(a) in the paper. And yet the end-to-end system
-is 2 to 4 times faster, because the memory efficiency gain swamps that
-per-kernel cost. [PAUSE] Fourth: the OS doesn't know our workload. We needed
-domain-specific policies it never had — all-or-nothing eviction of a whole
-sequence's blocks at once, gang-scheduling sequences that share blocks, and
-tuning the block size itself. More on those shortly.
+Beat 8 — The kernel is the pager.
+Second: an OS page-fault handler never touches your program's computation.
+It finds the page and hands control back. Here the computation is the
+memory access. The attention kernel had to be rewritten to gather those
+scattered KV blocks and attend in one fused pass. An OS pager never
+rewrites your program. [PAUSE]
 
-Beat 7 — Landing.
+Beat 9 — The kernel is slower.
+And that rewrite is not free. A page fault is rare. Ours happens on every
+token, every step: attention reads every block, every time. That's why the
+PagedAttention kernel itself runs about 20 to 26 percent slower than
+FasterTransformer's kernel on contiguous memory. [PAUSE]
+
+Beat 10 — And yet.
+And yet the end-to-end system is 2 to 4 times faster. Leftover VRAM now
+holds a bigger batch. The memory win swamps the per-kernel cost. We will
+measure that kernel overhead after the results. [PAUSE]
+
+Beat 11 — Landing.
 So: an OS idea, re-engineered for a workload the OS was never designed for.
-
-Beat 8 — Checkpoint.
+A new kernel. New policies still to come — because every block of a
+sequence is always touched together, and OS-style per-page eviction does
+not apply.
 """
 
 from manim import (
@@ -67,17 +73,124 @@ from manim import (
     ORIGIN,
     RIGHT,
     UP,
-    AnimationGroup,
     FadeIn,
     FadeOut,
-    Rectangle,
+    SurroundingRectangle,
     Transform,
     VGroup,
 )
 from manim_slides import Slide
 
-from talk.theme import *
-from talk.components import *
+from talk.components import (
+    KVBlock,
+    arrow_map,
+    shoot,
+)
+from talk.theme import (
+    ACCENT,
+    ACCENT2,
+    FG,
+    GOOD,
+    MUTED,
+    TINY_SIZE,
+    WARN,
+    apply_theme,
+    act_checkpoint,
+    caption,
+    small,
+    text,
+    title,
+)
+
+CELL = 0.50
+FRAME_W = 13.2
+PICTURE_BOTTOM = -3.20
+
+
+def _fit_title(content):
+    t = title(content)
+    if t.width > FRAME_W:
+        t.scale_to_fit_width(FRAME_W)
+        t.to_edge(UP)
+    return t
+
+
+def _kv(index, words=None, cell=CELL):
+    words = words or ["", "", "", ""]
+    block = KVBlock(slots=4, cell=cell, words=words, index=None)
+    block.index_label.set_opacity(0)
+    block.index_label.scale(0.01)
+    block.index_label.move_to(block.cells.get_center())
+    idx = text(str(index), font_size=TINY_SIZE, color=MUTED)
+    idx.next_to(block.cells, LEFT, buff=0.10)
+    for i, w in enumerate(words):
+        if w:
+            block.cells[i].set_fill(ACCENT, opacity=1.0)
+    row = VGroup(idx, block)
+    row.cells = block.cells
+    row.kv = block
+    return row
+
+
+def _stack(title_str, rows):
+    body = VGroup(*rows)
+    body.arrange(DOWN, buff=0.16, aligned_edge=LEFT)
+    head = small(title_str, color=FG)
+    if head.width > body.width:
+        head.scale_to_fit_width(body.width)
+    head.next_to(body, UP, buff=0.16)
+    group = VGroup(head, body)
+    group.head = head
+    group.body = body
+    group.blocks = rows
+    return group
+
+
+def _mini_table(title_str, rows):
+    head = small(title_str, color=FG)
+    headers = ["logical", "physical", "filled"]
+    hdr = VGroup(*[caption(h) for h in headers])
+    hdr.arrange(RIGHT, buff=0.40)
+    body = VGroup()
+    for log, phys, filled in rows:
+        row = VGroup(
+            text(str(log), font_size=18, color=FG),
+            text(str(phys), font_size=18, color=ACCENT),
+            text(str(filled), font_size=18, color=FG),
+        )
+        row.arrange(RIGHT, buff=0.40)
+        body.add(row)
+    body.arrange(DOWN, buff=0.14, aligned_edge=LEFT)
+    for row in body:
+        for cell, hcell in zip(row, hdr):
+            cell.align_to(hcell, ORIGIN)
+            cell.set_x(hcell.get_x())
+    table = VGroup(head, hdr, body)
+    table.arrange(DOWN, buff=0.16)
+    table.head = head
+    return table
+
+
+def _place_under_title(mob, heading, bottom=PICTURE_BOTTOM):
+    mob.next_to(heading, DOWN, buff=0.32)
+    room = heading.get_bottom()[1] - 0.32 - bottom
+    if mob.height > room:
+        mob.scale_to_fit_height(room)
+        mob.next_to(heading, DOWN, buff=0.32)
+    if mob.width > FRAME_W:
+        mob.scale_to_fit_width(FRAME_W)
+        mob.next_to(heading, DOWN, buff=0.32)
+    return mob
+
+
+def _stat(value, label, color):
+    v = text(value, font_size=56, color=color)
+    lab = small(label, color=MUTED)
+    if lab.width > 5.4:
+        lab.scale_to_fit_width(5.4)
+    g = VGroup(v, lab)
+    g.arrange(DOWN, buff=0.22)
+    return g
 
 
 class S6OSAndWhyHard(Slide):
@@ -85,281 +198,267 @@ class S6OSAndWhyHard(Slide):
         apply_theme(self)
 
         # -------------------------------------------------------------
-        # Beat 1: the reveal — recreate the S5 picture
+        # Beat 1: pickup — S5 Fig 6 end state, in frame
         # -------------------------------------------------------------
-        heading = title("...this is what an operating system does.")
-        heading.scale(0.85)
+        heading = _fit_title("The mapping we just built")
 
-        logical_title = small("Logical blocks", font_size=SMALL_SIZE, color=MUTED)
-        logical_blocks = VGroup(
-            KVBlock(slots=4, cell=0.6, words=["Four", "score", "and", "seven"], index=0),
-            KVBlock(slots=4, cell=0.6, words=["years", "ago", "our", "fathers"], index=1),
+        logical = _stack(
+            "Logical blocks",
+            [
+                _kv(0, ["Four", "score", "and", "seven"]),
+                _kv(1, ["years", "ago", "our", "fathers"]),
+                _kv(2, ["brought", "", "", ""]),
+            ],
         )
-        for kb in logical_blocks:
-            for cell in kb.cells:
-                cell.set_fill(ACCENT, opacity=1.0)
-        logical_blocks.arrange(DOWN, buff=0.5)
-        logical_group = VGroup(logical_title, logical_blocks)
-        logical_title.next_to(logical_blocks, UP, buff=0.3)
+        table = _mini_table(
+            "Block table",
+            [(0, 7, "4/4"), (1, 1, "4/4"), (2, 3, "1/4")],
+        )
+        physical = _stack(
+            "Physical GPU memory",
+            [
+                _kv(0),
+                _kv(1, ["years", "ago", "our", "fathers"]),
+                _kv(3, ["brought", "", "", ""]),
+                _kv(7, ["Four", "score", "and", "seven"]),
+            ],
+        )
 
-        table = BlockTable(n_rows=2, title="Block table")
+        picture = VGroup(logical, table, physical)
+        picture.arrange(RIGHT, buff=0.55, aligned_edge=UP)
+        _place_under_title(picture, heading)
 
-        # Build the physical grid manually (rather than via fill_slot after the
-        # fact) so the KV word labels are correct from the start; this avoids
-        # PhysicalMemGrid/KVBlock.fill_slot leaving orphaned label mobjects
-        # behind when the whole picture is later scaled/moved as a group.
-        phys_b0 = KVBlock(slots=4, cell=0.6, words=["years", "ago", "our", "fathers"], index=0)
-        phys_b1 = KVBlock(slots=4, cell=0.6, index=1)
-        phys_b2 = KVBlock(slots=4, cell=0.6, words=["Four", "score", "and", "seven"], index=2)
-        phys_b3 = KVBlock(slots=4, cell=0.6, index=3)
-        for kb in (phys_b0, phys_b2):
-            for cell in kb.cells:
-                cell.set_fill(ACCENT, opacity=1.0)
-        phys_grid = VGroup(phys_b0, phys_b1, phys_b2, phys_b3)
-        phys_grid.arrange_in_grid(rows=2, cols=2, buff=0.35)
-        physical_title_txt = small("Physical GPU memory", font_size=SMALL_SIZE, color=FG)
-        physical_title_txt.next_to(phys_grid, UP, buff=0.3)
-        physical = VGroup(physical_title_txt, phys_grid)
-        physical.title = physical_title_txt
-
-        logical_group.move_to(LEFT * 5.3 + DOWN * 0.3)
-        table.move_to(LEFT * 0.8 + DOWN * 0.3)
-        physical.move_to(RIGHT * 4.3 + DOWN * 0.3)
-
-        self.play(FadeIn(heading))
-        self.play(FadeIn(logical_group))
-        self.play(FadeIn(table))
-        self.play(FadeIn(physical))
-        self.play(table.set_row(0, 2, 4), table.set_row(1, 0, 4))
-
-        arrow1 = arrow_map(logical_group, table, color=MUTED)
-        arrow2 = arrow_map(table, physical, color=MUTED)
-        self.play(shoot(arrow1), shoot(arrow2))
-        self.wait(0.3)
+        self.play(FadeIn(heading), run_time=0.6)
+        self.play(FadeIn(logical), run_time=0.7)
+        self.play(FadeIn(table), run_time=0.6)
+        self.play(FadeIn(physical), run_time=0.8)
+        a_lt = arrow_map(logical, table, color=MUTED)
+        a_tp = arrow_map(table, physical, color=MUTED)
+        self.play(shoot(a_lt), shoot(a_tp), run_time=0.8)
+        self.wait(0.5)
         self.next_slide()
 
         # -------------------------------------------------------------
-        # Beat 2: morph labels into OS vocabulary
+        # Beat 2: reveal
         # -------------------------------------------------------------
-        self.play(FadeOut(heading))
-        heading2 = title("Same picture, OS vocabulary")
-        heading2.scale(0.85)
-        self.play(FadeIn(heading2))
+        heading = self._retitle(heading, "...this is what an operating system does.")
+        self.wait(0.5)
+        self.next_slide()
 
-        new_logical_title = small("Pages (per process)", font_size=SMALL_SIZE, color=MUTED)
-        new_logical_title.move_to(logical_title.get_center())
-        new_table_title = small("Page table", font_size=SMALL_SIZE, color=FG)
-        new_table_title.move_to(table.title.get_center())
-        new_physical_title = small("Physical RAM", font_size=SMALL_SIZE, color=FG)
-        new_physical_title.move_to(physical.title.get_center())
+        # -------------------------------------------------------------
+        # Beat 3: relabel in place — one title at a time
+        # -------------------------------------------------------------
+        heading = self._retitle(heading, "Same picture, OS vocabulary")
+
+        new_logical = small("Virtual pages", color=FG)
+        if new_logical.width > logical.body.width + 0.4:
+            new_logical.scale_to_fit_width(logical.body.width + 0.4)
+        new_logical.move_to(logical.head.get_center())
+
+        new_table = small("Page table", color=FG)
+        new_table.move_to(table.head.get_center())
+
+        new_phys = small("Physical frames", color=FG)
+        if new_phys.width > physical.body.width:
+            new_phys.scale_to_fit_width(physical.body.width)
+        new_phys.move_to(physical.head.get_center())
+
+        self.play(Transform(logical.head, new_logical), run_time=0.7)
+        self.play(Transform(table.head, new_table), run_time=0.7)
+        self.play(Transform(physical.head, new_phys), run_time=0.7)
+        gloss = caption("tokens → bytes     request → process")
+        gloss.to_edge(DOWN, buff=0.28)
+        self.play(FadeIn(gloss), run_time=0.5)
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 4: demand paging shown on the same picture
+        # -------------------------------------------------------------
+        heading = self._retitle(heading, "Demand paging", FadeOut(gloss))
+        self._dump(gloss)
+
+        virt_ring = SurroundingRectangle(
+            logical.body, buff=0.10, color=ACCENT2, stroke_width=2,
+        )
+        phys_ring = SurroundingRectangle(
+            physical.body, buff=0.10, color=ACCENT, stroke_width=2,
+        )
+        foot = caption(
+            "contiguous virtual view  ·  scattered frames  ·  on demand, no external holes"
+        )
+        foot.to_edge(DOWN, buff=0.26)
+        if foot.width > FRAME_W:
+            foot.scale_to_fit_width(FRAME_W)
+            foot.to_edge(DOWN, buff=0.26)
+
+        self.play(FadeIn(virt_ring), run_time=0.6)
+        self.play(FadeIn(phys_ring), run_time=0.6)
+        self.play(FadeIn(foot), run_time=0.5)
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 5: the question only — sit with it
+        # -------------------------------------------------------------
+        heading = self._retitle(
+            heading,
+            "So was this just copying the OS?",
+            FadeOut(virt_ring),
+            FadeOut(phys_ring),
+            FadeOut(foot),
+        )
+        self._dump(VGroup(virt_ring, phys_ring, foot))
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 6: the answer
+        # -------------------------------------------------------------
+        answer = small("The idea transfers. The engineering does not.", color=ACCENT)
+        if answer.width > FRAME_W:
+            answer.scale_to_fit_width(FRAME_W)
+        answer.to_edge(DOWN, buff=0.28)
+        self.play(FadeIn(answer), run_time=0.7)
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 7: no GPU MMU — stay on the picture, highlight the table
+        # -------------------------------------------------------------
+        heading = self._retitle(
+            heading,
+            "The GPU has no MMU",
+            FadeOut(answer),
+        )
+        self._dump(answer)
+
+        table_ring = SurroundingRectangle(
+            table, buff=0.12, color=WARN, stroke_width=2,
+        )
+        mmu_foot = caption("The kernel walks this table itself, every access.")
+        mmu_foot.to_edge(DOWN, buff=0.28)
+        if mmu_foot.width > FRAME_W:
+            mmu_foot.scale_to_fit_width(FRAME_W)
+            mmu_foot.to_edge(DOWN, buff=0.28)
+        self.play(FadeIn(table_ring), run_time=0.6)
+        self.play(FadeIn(mmu_foot), run_time=0.5)
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 8: the kernel is the pager — still on the picture
+        # -------------------------------------------------------------
+        heading = self._retitle(
+            heading,
+            "The kernel is the pager",
+            FadeOut(table_ring),
+            FadeOut(mmu_foot),
+        )
+        self._dump(VGroup(table_ring, mmu_foot))
+
+        phys_ring2 = SurroundingRectangle(
+            physical.body, buff=0.10, color=ACCENT2, stroke_width=2,
+        )
+        pager_foot = caption(
+            "Gather scattered KV and attend in one fused pass.  An OS pager never rewrites your program."
+        )
+        pager_foot.to_edge(DOWN, buff=0.26)
+        if pager_foot.width > FRAME_W:
+            pager_foot.scale_to_fit_width(FRAME_W)
+            pager_foot.to_edge(DOWN, buff=0.26)
+        self.play(FadeIn(phys_ring2), run_time=0.6)
+        self.play(FadeIn(pager_foot), run_time=0.5)
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 9: the kernel is slower — one number
+        # -------------------------------------------------------------
+        self.play(
+            FadeOut(heading),
+            FadeOut(picture),
+            FadeOut(a_lt),
+            FadeOut(a_tp),
+            FadeOut(phys_ring2),
+            FadeOut(pager_foot),
+            run_time=0.6,
+        )
+        self._dump(VGroup(heading, picture, a_lt, a_tp, phys_ring2, pager_foot))
+
+        heading = _fit_title("And that kernel is slower")
+        self.play(FadeIn(heading), run_time=0.6)
+
+        left = _stat("+20–26%", "slower attention kernel", WARN)
+        left.move_to(ORIGIN + UP * 0.2)
+        vs = caption("vs FasterTransformer, contiguous KV")
+        vs.next_to(left, DOWN, buff=0.22)
+        hot = small("Every token, every block — not a rare page fault.", color=FG)
+        if hot.width > FRAME_W:
+            hot.scale_to_fit_width(FRAME_W)
+        hot.to_edge(DOWN, buff=0.4)
+
+        self.play(FadeIn(left), run_time=0.7)
+        self.play(FadeIn(vs), run_time=0.45)
+        self.play(FadeIn(hot), run_time=0.5)
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 10: and yet, 2–4×
+        # -------------------------------------------------------------
+        self.play(left.animate.shift(LEFT * 2.6), vs.animate.shift(LEFT * 2.6), run_time=0.7)
+        right = _stat("2–4×", "faster end to end", GOOD)
+        right.move_to(ORIGIN + RIGHT * 2.6 + UP * 0.2)
+        why = caption("leftover VRAM holds a bigger batch")
+        why.next_to(right, DOWN, buff=0.22)
+        self.play(FadeIn(right), FadeIn(why), run_time=0.7)
+        self.wait(0.5)
+        self.next_slide()
+
+        # -------------------------------------------------------------
+        # Beat 11: landing + Act III checkpoint
+        # -------------------------------------------------------------
+        land = small("An OS idea. A new kernel. New policies still to come.", color=ACCENT)
+        if land.width > FRAME_W:
+            land.scale_to_fit_width(FRAME_W)
+        land.move_to(hot.get_center())
+        self.play(FadeOut(hot), FadeIn(land), run_time=0.7)
+        self._dump(hot)
+        self.wait(0.5)
+        self.next_slide()
 
         self.play(
-            Transform(logical_title, new_logical_title),
-            Transform(table.title, new_table_title),
-            Transform(physical.title, new_physical_title),
+            FadeOut(heading),
+            FadeOut(left),
+            FadeOut(right),
+            FadeOut(vs),
+            FadeOut(why),
+            FadeOut(land),
+            run_time=0.5,
         )
-
-        mapping_pairs = [
-            ("blocks", "pages"),
-            ("tokens", "bytes"),
-            ("requests", "processes"),
-            ("block table", "page table"),
-            ("GPU memory", "physical RAM"),
-        ]
-        map_rows = VGroup()
-        for our_term, os_term in mapping_pairs:
-            left_cell = small(our_term, font_size=SMALL_SIZE, color=ACCENT)
-            arrow_cell = small("->", font_size=SMALL_SIZE, color=MUTED)
-            right_cell = small(os_term, font_size=SMALL_SIZE, color=ACCENT2)
-            row = VGroup(left_cell, arrow_cell, right_cell)
-            row.arrange(RIGHT, buff=0.35)
-            map_rows.add(row)
-        map_rows.arrange(DOWN, buff=0.28, aligned_edge=LEFT)
-        map_header = VGroup(small("vLLM term", font_size=TINY_SIZE, color=MUTED),
-                             small("", font_size=TINY_SIZE),
-                             small("OS term", font_size=TINY_SIZE, color=MUTED))
-        map_full = VGroup(map_rows)
-        map_full.scale(0.85)
-        map_full.to_edge(DOWN, buff=0.5)
-
-        picture_group = VGroup(logical_group, table, physical, arrow1, arrow2)
-        self.play(picture_group.animate.scale(0.72).to_edge(UP, buff=1.3))
-        map_full.next_to(picture_group, DOWN, buff=0.5)
-
-        for row in map_rows:
-            self.play(FadeIn(row), run_time=0.4)
-        self.wait(0.3)
-        self.next_slide()
-
-        self.play(FadeOut(heading2), FadeOut(picture_group), FadeOut(map_full))
-
-        # -------------------------------------------------------------
-        # Beat 3: OS paging intuition
-        # -------------------------------------------------------------
-        heading3 = title("Paging, in one breath")
-        self.play(FadeIn(heading3))
-
-        intuition_lines = VGroup(
-            small("Each process believes it has one contiguous address space", font_size=SMALL_SIZE),
-            small("The page table scatters it across free physical frames", font_size=SMALL_SIZE),
-            small("Frames are handed out on demand, not reserved up front", font_size=SMALL_SIZE),
-            small("Result: no external fragmentation", font_size=SMALL_SIZE, color=GOOD),
-        )
-        intuition_lines.arrange(DOWN, buff=0.35, aligned_edge=LEFT)
-        intuition_lines.move_to(LEFT * 4.0)
-
-        physical2 = PhysicalMemGrid(n_blocks=6, slots=4, cols=3, cell=0.45, title="Physical frames")
-        physical2.move_to(RIGHT * 3.6)
-        fill_anims = []
-        for i in (1, 4):
-            for s in range(4):
-                fill_anims.append(physical2.block(i).set_state(s, "filled"))
-
-        self.play(FadeIn(intuition_lines))
-        self.play(FadeIn(physical2))
-        self.play(*fill_anims)
-        self.wait(0.3)
-        self.next_slide()
-        self.play(FadeOut(heading3), FadeOut(intuition_lines), FadeOut(physical2))
-
-        # -------------------------------------------------------------
-        # Beat 4: "So was this just copying the OS?" -> "No."
-        # -------------------------------------------------------------
-        question = title("So was this just... copying the OS?")
-        question.scale(0.85)
-        question.move_to(UP * 0.5)
-        self.play(FadeIn(question))
-
-        no_text = title("No.")
-        no_text.set_color(ACCENT)
-        no_text.move_to(DOWN * 1.0)
-        self.play(FadeIn(no_text))
-        self.wait(0.3)
-        self.next_slide()
-        self.play(FadeOut(question), FadeOut(no_text))
-
-        # -------------------------------------------------------------
-        # Beat 5: reasons (a) no HW MMU  (b) kernel rewritten
-        # -------------------------------------------------------------
-        heading5 = title("Reason 1 & 2: no hardware help, and the kernel changes")
-        heading5.scale(0.75)
-        self.play(FadeIn(heading5))
-
-        mmu_box = Rectangle(width=4.6, height=1.6, fill_color=BLOCK_FILL, fill_opacity=1.0,
-                             stroke_color=BLOCK_STROKE, stroke_width=2)
-        mmu_box.move_to(LEFT * 4.8 + UP * 0.9)
-        mmu_label = small("No GPU MMU / TLB", font_size=SMALL_SIZE, color=BAD)
-        mmu_sub = caption("Translation done in software,\ninside the kernel, every access")
-        mmu_sub.next_to(mmu_label, DOWN, buff=0.2)
-        mmu_group = VGroup(mmu_box, VGroup(mmu_label, mmu_sub).move_to(mmu_box.get_center()))
-
-        self.play(FadeIn(mmu_group))
-        self.next_slide()
-
-        kernel_caption = small("The attention kernel itself is rewritten:", font_size=SMALL_SIZE, color=MUTED)
-        kernel_caption.next_to(mmu_group, DOWN, buff=0.7).align_to(mmu_group, LEFT)
-
-        stage_names = [
-            "fused reshape\n+ block write",
-            "fused block read\n+ attention",
-            "fused block copy\n(copy-on-write)",
-        ]
-        stages = VGroup()
-        for name in stage_names:
-            box = Rectangle(width=2.6, height=1.3, fill_color=ACCENT2, fill_opacity=0.15,
-                             stroke_color=ACCENT2, stroke_width=2)
-            lbl = small(name, font_size=TINY_SIZE, color=FG)
-            lbl.move_to(box.get_center())
-            stages.add(VGroup(box, lbl))
-        stages.arrange(RIGHT, buff=0.55)
-        stages.next_to(kernel_caption, DOWN, buff=0.4)
-        stages.move_to(RIGHT * 1.0 + DOWN * 1.6)
-        kernel_caption.next_to(stages, UP, buff=0.35)
-
-        stage_arrows = VGroup(*[
-            arrow(
-                stages[i].get_right(), stages[i + 1].get_left(),
-                buff=0.1,
-            )
-            for i in range(len(stages) - 1)
-        ])
-
-        self.play(FadeIn(kernel_caption))
-        self.play(FadeIn(stages[0]))
-        self.play(shoot(stage_arrows[0]), FadeIn(stages[1]))
-        self.play(shoot(stage_arrows[1]), FadeIn(stages[2]))
-        self.wait(0.3)
-        self.next_slide()
-        self.play(
-            FadeOut(heading5), FadeOut(mmu_group), FadeOut(kernel_caption),
-            FadeOut(stages), FadeOut(stage_arrows),
-        )
-
-        # -------------------------------------------------------------
-        # Beat 6: reasons (c) access pattern / Fig 18a  (d) domain policies
-        # -------------------------------------------------------------
-        heading6 = title("Reason 3 & 4: not a rare fault, and no OS policy fits")
-        heading6.scale(0.7)
-        self.play(FadeIn(heading6))
-
-        access_caption = small("Every token, every step touches every block", font_size=SMALL_SIZE, color=WARN)
-        access_caption.move_to(LEFT * 3.6 + UP * 1.6)
-        self.play(FadeIn(access_caption))
-
-        overhead_chart = bar_chart(
-            categories=["Kernel latency", "End-to-end throughput"],
-            series={
-                "FasterTransformer": [1.0, 1.0],
-                "vLLM": [1.23, 3.0],
-            },
-            y_label="relative",
-            width=6.0, height=3.0,
-            value_labels=True,
-        )
-        overhead_chart.scale(0.72)
-        overhead_chart.move_to(LEFT * 3.6 + DOWN * 1.0)
-        self.play(FadeIn(overhead_chart))
-        overhead_note = caption("Schematic only — exact Fig. 18(a) benchmark appears later")
-        overhead_note.next_to(overhead_chart, DOWN, buff=0.3)
-        self.play(FadeIn(overhead_note))
-        self.next_slide()
-
-        policy_title = small("Domain-specific policies the OS never needed:", font_size=SMALL_SIZE, color=MUTED)
-        policy_title.move_to(RIGHT * 3.6 + UP * 1.6)
-        policies = VGroup(
-            small("- all-or-nothing eviction of a sequence's blocks", font_size=TINY_SIZE),
-            small("- gang-scheduling sequences that share blocks", font_size=TINY_SIZE),
-            small("- tuned block size (parallelism vs fragmentation)", font_size=TINY_SIZE),
-        )
-        policies.arrange(DOWN, buff=0.3, aligned_edge=LEFT)
-        policies.next_to(policy_title, DOWN, buff=0.35).align_to(policy_title, LEFT)
-        self.play(FadeIn(policy_title))
-        self.play(FadeIn(policies), run_time=0.6)
-        self.wait(0.3)
-        self.next_slide()
-        self.play(
-            FadeOut(heading6), FadeOut(access_caption), FadeOut(overhead_chart),
-            FadeOut(overhead_note), FadeOut(policy_title), FadeOut(policies),
-        )
-
-        # -------------------------------------------------------------
-        # Beat 7: landing
-        # -------------------------------------------------------------
-        landing = title("An OS idea, re-engineered for a workload the OS never had.")
-        landing.scale(0.72)
-        landing.move_to(ORIGIN)
-        self.play(FadeIn(landing))
-        self.wait(0.3)
-        self.next_slide()
-        self.play(FadeOut(landing))
-
-        # -------------------------------------------------------------
-        # Beat 8: act checkpoint -> seam to Act III
-        # -------------------------------------------------------------
         act_checkpoint(
-            self, 3, "The payoffs",
-            done=["Act I — Why memory is the bottleneck", "Act II — The idea: page the KV cache"],
+            self,
+            3,
+            "The payoffs",
+            done=[
+                "Act I — Why memory is the bottleneck",
+                "Act II — The idea: page the KV cache",
+            ],
             current="Act III — The payoffs",
             upcoming=[],
         )
-        self.wait(0.3)
+
+    def _retitle(self, old, new_str, *anims, run_time=0.7):
+        new = _fit_title(new_str)
+        extra = list(anims)
+        if old is not None:
+            extra = [FadeOut(old, shift=UP * 0.15)] + extra
+            self.play(FadeIn(new, shift=DOWN * 0.08), *extra, run_time=run_time)
+            self._dump(old)
+        else:
+            self.play(FadeIn(new), *extra, run_time=run_time)
+        return new
+
+    def _dump(self, mob):
+        self.remove(mob)

@@ -3,14 +3,14 @@
 NARRATION
 ---------
 Beat 1 — The kernel itself is slower.
-Before we celebrate, let's be honest about the cost. PagedAttention's own
-attention kernel has to look up a block table and read key/value data from
-scattered, non-contiguous memory locations, instead of one clean contiguous
-strip. The paper measures this in isolation: across batch sizes and context
-lengths, vLLM's attention kernel runs about 20 to 26% slower than
-FasterTransformer's tightly hand-optimized kernel. [PAUSE] That's a real,
-measurable cost — but attention is only one operator in a whole forward
-pass, so this slowdown barely dents end-to-end latency.
+The OS scene already said it: PagedAttention's attention kernel is slower
+on its own. Here is the measurement. The kernel has to look up a block
+table and read key/value data from scattered, non-contiguous memory
+instead of one clean contiguous strip. Across batch sizes and context
+lengths, it runs about 20 to 26% slower than FasterTransformer's tightly
+hand-optimized kernel. [PAUSE] That's a real cost — but attention is only
+one operator in a whole forward pass, so this slowdown barely dents
+end-to-end latency.
 
 Beat 2 — Picking the block size.
 The other knob is block size: how many tokens live in one page. Make blocks

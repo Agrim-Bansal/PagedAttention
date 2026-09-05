@@ -1,4 +1,4 @@
-"""S1 — Transformers & attention (Act I): the box that emits one token at a time.
+"""S2 — Transformers & attention (Act I): the box that emits one token at a time.
 
 NARRATION
 
@@ -149,7 +149,7 @@ def _metrics_in_box(values, loop, as_bars=False):
     return cells
 
 
-class S1Transformers(Slide):
+class S2Transformers(Slide):
     def construct(self):
         apply_theme(self)
 

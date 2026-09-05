@@ -19,6 +19,7 @@ from manim import (
     Arrow,
     Circle,
     Create,
+    DashedLine,
     Dot,
     FadeIn,
     FadeOut,
@@ -26,6 +27,7 @@ from manim import (
     Indicate,
     Line,
     Rectangle,
+    Triangle,
     RoundedRectangle,
     Square,
     StealthTip,
@@ -525,7 +527,7 @@ class GPUSchematic(VGroup):
 
 
 # ---------------------------------------------------------------------------
-# Transformer box / decode loop (S1 spine)
+# Transformer box / decode loop (S2 spine)
 # ---------------------------------------------------------------------------
 
 _CHIP_SIDE = 0.26
@@ -832,27 +834,141 @@ def attention_diagram(tokens, query_index, kv_colors=True):
 # ---------------------------------------------------------------------------
 
 
+def _fmt_tick(v):
+    if abs(v) < 1e-9:
+        return "0"
+    if abs(v - round(v)) < 1e-6:
+        return str(int(round(v)))
+    if abs(v) >= 10:
+        return f"{v:.0f}"
+    return f"{v:g}"
+
+
+def _axis_ticks(lo, hi, step):
+    if step is None or step <= 0:
+        step = (hi - lo) / 4 if hi != lo else 1
+    n = int(round((hi - lo) / step))
+    vals = [lo + i * step for i in range(max(n, 0) + 1)]
+    vals = [v for v in vals if v <= hi + 1e-9 * max(abs(hi), 1)]
+    if not vals:
+        return [lo, hi]
+    if vals[-1] < hi - 1e-6 * max(abs(hi), 1):
+        vals.append(hi)
+    return vals
+
+
+def _pretty_step(y_max, target=4):
+    if y_max <= 0:
+        return 1
+    raw = y_max / target
+    exp = math.floor(math.log10(raw)) if raw > 0 else 0
+    frac = raw / (10 ** exp)
+    if frac <= 1:
+        nice = 1
+    elif frac <= 2:
+        nice = 2
+    elif frac <= 2.5:
+        nice = 2.5
+    elif frac <= 5:
+        nice = 5
+    else:
+        nice = 10
+    return nice * (10 ** exp)
+
+
+def _marker(shape, point, color, size=0.07):
+    """Paper-style markers: circle, square, triangle, x."""
+    if shape == "square":
+        sq = Square(
+            side_length=size * 1.7,
+            fill_color=color,
+            fill_opacity=1.0,
+            stroke_width=0,
+        )
+        sq.move_to(point)
+        return sq
+    if shape == "triangle":
+        tri = Triangle(fill_color=color, fill_opacity=1.0, stroke_width=0)
+        tri.width = size * 2.0
+        tri.move_to(point)
+        return tri
+    if shape == "x":
+        d = size * 0.9
+        return VGroup(
+            Line(
+                [point[0] - d, point[1] - d, 0],
+                [point[0] + d, point[1] + d, 0],
+                color=color,
+                stroke_width=2.2,
+            ),
+            Line(
+                [point[0] - d, point[1] + d, 0],
+                [point[0] + d, point[1] - d, 0],
+                color=color,
+                stroke_width=2.2,
+            ),
+        )
+    return Dot(point, color=color, radius=size)
+
+
 class _BarChart(VGroup):
     def __init__(self):
         super().__init__()
         self.axes = None
         self.bars = {}
+        self.value_labels = {}
         self.legend = None
         self.x_labels = None
+        self.y_ticks = None
+        self.grid = None
         self.y_label = None
+        self.x_label = None
+
+    def _frame_parts(self):
+        parts = [self.axes, self.grid, self.x_labels, self.y_ticks]
+        if self.legend is not None and self.legend in self:
+            parts.append(self.legend)
+        if self.y_label is not None:
+            parts.append(self.y_label)
+        if self.x_label is not None:
+            parts.append(self.x_label)
+        return [p for p in parts if p is not None]
+
+    def fade_frame(self):
+        return FadeIn(*self._frame_parts())
+
+    def grow_series(self, name):
+        anims = [GrowFromEdge(b, DOWN) for b in self.bars[name]]
+        labels = self.value_labels.get(name)
+        if labels is not None and len(labels) > 0:
+            anims.append(FadeIn(labels))
+        return AnimationGroup(*anims)
 
     def animate_in(self):
-        static = [self.axes, self.x_labels, self.legend]
-        if self.y_label is not None:
-            static.append(self.y_label)
-        anims = [FadeIn(*static)]
-        for name, group in self.bars.items():
-            anims.extend([GrowFromEdge(b, DOWN) for b in group])
-        return AnimationGroup(*anims, lag_ratio=0.05)
+        anims = [self.fade_frame()]
+        for name in self.bars:
+            anims.append(self.grow_series(name))
+        return AnimationGroup(*anims, lag_ratio=0.12)
 
 
-def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, height=4, value_labels=False):
-    """Grouped bar chart. series = {"name": [values...]}. Native Rectangles on an Axes."""
+def bar_chart(
+    categories,
+    series,
+    y_label="",
+    y_max=None,
+    colors=None,
+    width=8,
+    height=4,
+    value_labels=False,
+    show_legend=True,
+    x_label="",
+):
+    """Grouped bar chart. series = {"name": [values...]}. Native Rectangles on an Axes.
+
+    Bars are placed via axes.c2p so x, width, and height share one coordinate
+    system. .bars is name -> VGroup of Rectangles only; value labels live in
+    .value_labels so GrowFromEdge does not distort them.
+    """
     chart = _BarChart()
     names = list(series.keys())
     if colors is None:
@@ -860,11 +976,16 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
         colors = {name: default_colors[i % len(default_colors)] for i, name in enumerate(names)}
     all_vals = [v for vals in series.values() for v in vals]
     computed_max = max(all_vals) if all_vals else 1.0
-    y_max = y_max if y_max is not None else computed_max * 1.2
+    y_max = y_max if y_max is not None else computed_max * 1.15
+    if y_max <= 0:
+        y_max = 1.0
+    y_step = _pretty_step(y_max)
+    axis_hi = y_max
 
+    n_cats = len(categories)
     axes = Axes(
-        x_range=[0, len(categories), 1],
-        y_range=[0, y_max, y_max / 4 if y_max else 1],
+        x_range=[0, n_cats, 1],
+        y_range=[0, axis_hi, y_step],
         x_length=width,
         y_length=height,
         axis_config={"include_ticks": False, "include_numbers": False, "color": MUTED},
@@ -873,16 +994,40 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
     chart.axes = axes
     chart.add(axes)
 
-    n_series = len(names)
-    n_cats = len(categories)
-    group_width = width / n_cats
-    bar_width = group_width / (n_series + 1)
+    y_tick_vals = _axis_ticks(0, axis_hi, y_step)
+    grid = VGroup()
+    y_ticks = VGroup()
+    for ty in y_tick_vals:
+        if ty > 1e-9:
+            gl = DashedLine(
+                axes.c2p(0, ty),
+                axes.c2p(n_cats, ty),
+                color=MUTED,
+                stroke_width=1,
+                dash_length=0.12,
+            )
+            gl.set_opacity(0.35)
+            grid.add(gl)
+        p = axes.c2p(0, ty)
+        mark = Line([p[0] - 0.08, p[1], 0], p, color=MUTED, stroke_width=1.5)
+        lbl = text(_fmt_tick(ty), font_size=TINY_SIZE, color=MUTED)
+        lbl.move_to([p[0] - 0.32, p[1], 0])
+        y_ticks.add(mark, lbl)
+    chart.grid = grid
+    chart.y_ticks = y_ticks
+    chart.add(grid, y_ticks)
+
+    n_series = max(len(names), 1)
+    pad = 0.16
+    usable = 1.0 - 2 * pad
+    slot = usable / n_series
+    bar_data_w = slot * 0.82
 
     x_labels = VGroup()
     for i, cat in enumerate(categories):
         lbl = text(str(cat), font_size=TINY_SIZE, color=MUTED)
-        cat_center = axes.c2p(i + 0.5, 0)
-        lbl.next_to(cat_center, DOWN, buff=0.2)
+        p = axes.c2p(i + 0.5, 0)
+        lbl.move_to([p[0], p[1] - 0.22, 0])
         x_labels.add(lbl)
     chart.x_labels = x_labels
     chart.add(x_labels)
@@ -890,13 +1035,17 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
     for s_idx, name in enumerate(names):
         color = colors[name]
         bar_group = VGroup()
+        label_group = VGroup()
         for c_idx, val in enumerate(series[name]):
-            x0 = c_idx + 0.5 - (n_series * bar_width) / (2 * (width / n_cats)) + s_idx * bar_width / (width / n_cats)
-            base = axes.c2p(c_idx + (s_idx + 0.5) / (n_series + 1) + 0.5 / (n_series + 1) - 0.5, 0)
-            top = axes.c2p(c_idx + (s_idx + 0.5) / (n_series + 1) + 0.5 / (n_series + 1) - 0.5, val)
+            x_center = c_idx + pad + (s_idx + 0.5) * slot
+            left = axes.c2p(x_center - bar_data_w / 2, 0)
+            right = axes.c2p(x_center + bar_data_w / 2, 0)
+            base = axes.c2p(x_center, 0)
+            top = axes.c2p(x_center, val)
+            bar_w = abs(right[0] - left[0])
             bar_h = abs(top[1] - base[1])
             rect = Rectangle(
-                width=bar_width * 0.9,
+                width=max(bar_w, 1e-6),
                 height=max(bar_h, 1e-6),
                 fill_color=color,
                 fill_opacity=1.0,
@@ -907,25 +1056,35 @@ def bar_chart(categories, series, y_label="", y_max=None, colors=None, width=8, 
             if value_labels:
                 vlabel = text(f"{val:g}", font_size=TINY_SIZE, color=FG)
                 vlabel.next_to(rect, UP, buff=0.08)
-                bar_group.add(vlabel)
+                label_group.add(vlabel)
         chart.bars[name] = bar_group
         chart.add(bar_group)
+        chart.value_labels[name] = label_group
+        if len(label_group) > 0:
+            chart.add(label_group)
 
     legend = VGroup()
     for name in names:
-        swatch = Square(side_length=0.2, fill_color=colors[name], fill_opacity=1.0, stroke_width=0)
+        swatch = Square(side_length=0.18, fill_color=colors[name], fill_opacity=1.0, stroke_width=0)
         txt = text(name, font_size=TINY_SIZE, color=FG)
-        txt.next_to(swatch, RIGHT, buff=0.12)
+        txt.next_to(swatch, RIGHT, buff=0.1)
         legend.add(VGroup(swatch, txt))
-    legend.arrange(RIGHT, buff=0.4)
-    legend.next_to(axes, UP, buff=0.4)
+    legend.arrange(RIGHT, buff=0.35)
+    legend.next_to(axes, UP, buff=0.28)
     chart.legend = legend
-    chart.add(legend)
+    if show_legend:
+        chart.add(legend)
+
+    if x_label:
+        xlab = text(x_label, font_size=TINY_SIZE, color=MUTED)
+        xlab.next_to(x_labels, DOWN, buff=0.12)
+        chart.x_label = xlab
+        chart.add(xlab)
 
     if y_label:
         ylab = text(y_label, font_size=TINY_SIZE, color=MUTED)
         ylab.rotate(math.pi / 2)
-        ylab.next_to(axes, LEFT, buff=0.8)
+        ylab.next_to(y_ticks, LEFT, buff=0.12)
         chart.y_label = ylab
         chart.add(ylab)
 
@@ -940,32 +1099,76 @@ class _LineChart(VGroup):
         self.dots = {}
         self.legend = None
         self.x_labels = None
+        self.x_marks = None
         self.y_ticks = None
+        self.grid = None
         self.x_label = None
         self.y_label = None
+        self.stroke_widths = {}
+
+    def _frame_parts(self):
+        parts = [self.axes, self.grid, self.x_marks, self.x_labels, self.y_ticks]
+        if self.legend is not None and self.legend in self:
+            parts.append(self.legend)
+        if self.x_label is not None:
+            parts.append(self.x_label)
+        if self.y_label is not None:
+            parts.append(self.y_label)
+        return [p for p in parts if p is not None]
+
+    def fade_frame(self):
+        return FadeIn(*self._frame_parts())
+
+    def draw_series(self, name):
+        anims = [Create(self.lines[name])]
+        dots = self.dots.get(name)
+        if dots is not None and len(dots) > 0:
+            anims.append(FadeIn(dots, lag_ratio=0.06))
+        return AnimationGroup(*anims)
+
+    def grow_series(self, name):
+        return self.draw_series(name)
 
     def animate_in(self):
-        static = [self.axes, self.x_labels, self.y_ticks, self.legend]
-        if self.x_label is not None:
-            static.append(self.x_label)
-        if self.y_label is not None:
-            static.append(self.y_label)
-        anims = [FadeIn(*static)]
-        for name, line in self.lines.items():
-            anims.append(Create(line))
-        for name, dots in self.dots.items():
-            anims.append(AnimationGroup(*[FadeIn(d) for d in dots], lag_ratio=0.1))
-        return AnimationGroup(*anims, lag_ratio=0.2)
+        anims = [self.fade_frame()]
+        for name in self.lines:
+            anims.append(self.draw_series(name))
+        return AnimationGroup(*anims, lag_ratio=0.18)
 
 
-def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, colors=None,
-               width=8, height=4, log_y=False, markers=True):
-    """Multi-series line chart. .axes, .lines (dict), .dots (dict), .legend."""
+def line_chart(
+    x,
+    series,
+    x_label="",
+    y_label="",
+    x_range=None,
+    y_range=None,
+    colors=None,
+    width=8,
+    height=4,
+    log_y=False,
+    markers=True,
+    marker_shapes=None,
+    stroke_widths=None,
+    show_legend=True,
+    x_ticks=None,
+    x_tick_labels=None,
+):
+    """Multi-series line chart. .axes, .lines (dict), .dots (dict), .legend.
+
+    Tick labels are sparse (from x_range / x_ticks), not one per data point.
+    marker_shapes: name -> 'circle' | 'square' | 'triangle' | 'x'.
+    x_tick_labels: optional strings, zipped with x_ticks (or with the chosen ticks).
+    """
     chart = _LineChart()
     names = list(series.keys())
     if colors is None:
         default_colors = [ACCENT, ACCENT2, V_COLOR, GOOD, WARN, MUTED]
         colors = {name: default_colors[i % len(default_colors)] for i, name in enumerate(names)}
+    if stroke_widths is None:
+        stroke_widths = {}
+    if marker_shapes is None:
+        marker_shapes = {}
 
     def transform(v):
         if log_y:
@@ -979,7 +1182,8 @@ def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, co
         pad = (y_hi - y_lo) * 0.1 or 1
         y_range = [y_lo - pad, y_hi + pad, (y_hi - y_lo + 2 * pad) / 4 or 1]
     if x_range is None:
-        x_range = [min(x), max(x), (max(x) - min(x)) / max(len(x) - 1, 1) or 1]
+        span = max(x) - min(x) if x else 1
+        x_range = [min(x), max(x), span / max(len(x) - 1, 1) or 1]
 
     axes = Axes(
         x_range=x_range,
@@ -992,59 +1196,110 @@ def line_chart(x, series, x_label="", y_label="", x_range=None, y_range=None, co
     chart.axes = axes
     chart.add(axes)
 
-    x_labels = VGroup()
-    for xi in x:
-        lbl = text(f"{xi:g}", font_size=TINY_SIZE, color=MUTED)
-        lbl.next_to(axes.c2p(xi, y_range[0]), DOWN, buff=0.15)
-        x_labels.add(lbl)
-    chart.add(x_labels)
-    chart.x_labels = x_labels
-
+    y_tick_vals = _axis_ticks(y_range[0], y_range[1], y_range[2])
+    grid = VGroup()
     y_ticks = VGroup()
-    n_yticks = 5
-    for i in range(n_yticks):
-        ty = y_range[0] + i * (y_range[1] - y_range[0]) / (n_yticks - 1)
-        val = 10 ** ty if log_y else ty
-        lbl = text(f"{val:.3g}", font_size=TINY_SIZE, color=MUTED)
-        lbl.next_to(axes.c2p(x_range[0], ty), LEFT, buff=0.15)
-        y_ticks.add(lbl)
-    chart.add(y_ticks)
+    for ty in y_tick_vals:
+        if abs(ty - y_range[0]) > 1e-9:
+            gl = DashedLine(
+                axes.c2p(x_range[0], ty),
+                axes.c2p(x_range[1], ty),
+                color=MUTED,
+                stroke_width=1,
+                dash_length=0.12,
+            )
+            gl.set_opacity(0.35)
+            grid.add(gl)
+        p = axes.c2p(x_range[0], ty)
+        mark = Line([p[0] - 0.08, p[1], 0], p, color=MUTED, stroke_width=1.5)
+        raw = 10 ** ty if log_y else ty
+        lbl = text(_fmt_tick(raw), font_size=TINY_SIZE, color=MUTED)
+        lbl.move_to([p[0] - 0.32, p[1], 0])
+        y_ticks.add(mark, lbl)
+    chart.grid = grid
     chart.y_ticks = y_ticks
+    chart.add(grid, y_ticks)
+
+    if x_ticks is not None:
+        tick_xs = list(x_ticks)
+    elif len(x) <= 8:
+        tick_xs = list(x)
+    else:
+        tick_xs = _axis_ticks(x_range[0], x_range[1], x_range[2])
+
+    x_labels = VGroup()
+    x_marks = VGroup()
+    for i, xi in enumerate(tick_xs):
+        if x_tick_labels is not None and i < len(x_tick_labels):
+            s = str(x_tick_labels[i])
+        else:
+            s = _fmt_tick(xi)
+        p = axes.c2p(xi, y_range[0])
+        mark = Line(p, [p[0], p[1] - 0.08, 0], color=MUTED, stroke_width=1.5)
+        lbl = text(s, font_size=TINY_SIZE, color=MUTED)
+        lbl.move_to([p[0], p[1] - 0.22, 0])
+        x_marks.add(mark)
+        x_labels.add(lbl)
+    chart.x_labels = x_labels
+    chart.x_marks = x_marks
+    chart.add(x_marks, x_labels)
 
     for name in names:
         color = colors[name]
+        sw = stroke_widths.get(name, 4.5 if name == "vLLM" else 3)
+        chart.stroke_widths[name] = sw
         pts = [axes.c2p(xi, transform(v)) for xi, v in zip(x, series[name])]
-        line = VGroup(*[Line(pts[i], pts[i + 1], color=color, stroke_width=3) for i in range(len(pts) - 1)])
+        segs = [
+            Line(pts[i], pts[i + 1], color=color, stroke_width=sw)
+            for i in range(len(pts) - 1)
+        ]
+        line = VGroup(*segs)
         chart.lines[name] = line
         chart.add(line)
         dots = VGroup()
         if markers:
-            for p in pts:
-                dots.add(Dot(p, color=color, radius=0.06))
+            shape = marker_shapes.get(name, "circle")
+            # Sparse markers so dense synthetic curves stay readable.
+            n = len(pts)
+            if n <= 8:
+                idxs = range(n)
+            else:
+                step = max(n // 6, 1)
+                idxs = list(range(0, n, step))
+                if idxs[-1] != n - 1:
+                    idxs.append(n - 1)
+            for i in idxs:
+                dots.add(_marker(shape, pts[i], color, size=0.065))
         chart.dots[name] = dots
         chart.add(dots)
 
     legend = VGroup()
     for name in names:
-        swatch = Line(ORIGIN, RIGHT * 0.3, color=colors[name], stroke_width=3)
+        color = colors[name]
+        shape = marker_shapes.get(name, "circle") if markers else "circle"
+        swatch = _marker(shape, ORIGIN, color, size=0.07)
+        stem = Line(LEFT * 0.16, RIGHT * 0.16, color=color, stroke_width=stroke_widths.get(name, 3))
+        icon = VGroup(stem, swatch)
         txt = text(name, font_size=TINY_SIZE, color=FG)
-        txt.next_to(swatch, RIGHT, buff=0.12)
-        legend.add(VGroup(swatch, txt))
-    legend.arrange(RIGHT, buff=0.4)
-    legend.next_to(axes, UP, buff=0.4)
+        txt.next_to(icon, RIGHT, buff=0.1)
+        legend.add(VGroup(icon, txt))
+    legend.arrange(RIGHT, buff=0.32)
+    legend.next_to(axes, UP, buff=0.28)
     chart.legend = legend
-    chart.add(legend)
+    if show_legend:
+        chart.add(legend)
 
     if x_label:
         xlab = text(x_label, font_size=TINY_SIZE, color=MUTED)
-        xlab.next_to(axes, DOWN, buff=0.6)
+        xlab.next_to(x_labels, DOWN, buff=0.12)
         chart.x_label = xlab
         chart.add(xlab)
     if y_label:
         ylab = text(y_label, font_size=TINY_SIZE, color=MUTED)
         ylab.rotate(math.pi / 2)
-        ylab.next_to(axes, LEFT, buff=0.7)
+        ylab.next_to(y_ticks, LEFT, buff=0.12)
         chart.y_label = ylab
         chart.add(ylab)
 
     return chart
+

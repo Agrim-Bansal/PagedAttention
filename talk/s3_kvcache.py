@@ -1,10 +1,10 @@
-"""S3 — The KV cache (Act I). Stitch: S1's growing K/V bundle × S2's leftover VRAM.
+"""S3 — The KV cache (Act I). Stitch: S2's growing K/V bundle × S1's leftover VRAM.
 
 NARRATION
 ---------
 Beat 1 — Pickup.
-Last scene, leftover VRAM was the serving budget. The scene before that, the
-box needed the Key and Value of every previous token to write the next word.
+Last scene, the box needed the Key and Value of every previous token to write
+the next word. The scene before that, leftover VRAM was the serving budget.
 That bundle is still sitting here — watch the Query on "years" look across
 every Key. We are going to name this bundle, size it, and put it in that
 leftover slice. [PAUSE]
@@ -278,7 +278,7 @@ class S3KVCache(Slide):
         self._math = None
 
         # ------------------------------------------------------------------
-        # Beat 1 — Pickup: S1 bundle × S2 leftover VRAM
+        # Beat 1 — Pickup: S2 bundle × S1 leftover VRAM
         # ------------------------------------------------------------------
         note = caption("Query of the newest token  ·  every previous Key and Value")
         note.to_edge(DOWN, buff=0.32)

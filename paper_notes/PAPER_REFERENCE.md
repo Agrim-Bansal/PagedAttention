@@ -71,36 +71,48 @@ On the left: "Query vector" box containing the token `forth`, with arrows pointi
 Caption explains blocks are not stored contiguously (Block 1, 2, 0 out of physical order) and the kernel fetches/multiplies against each block separately, e.g. using key vectors of "Four score and seven" for block 0 to compute attention score, etc.
 
 ### Figure 6 (page 6, left) — "Block table translation in vLLM"
-DIAGRAM, the worked example for §4.3. Elements:
-- "Request A" circle (yellow) at far left, with annotation: Prompt: "Four score and seven years ago our fathers" Outputs: "brought" -> "forth" -> ...
-- "Logical KV blocks" table (left-middle), 4 rows:
-  - Block 0: `Four, score, and, seven`
-  - Block 1: `years, ago, our, fathers`
-  - Block 2: `brought` (only first slot filled; rest blank) — this is the block currently being filled ("Request A current iteration" annotation points here, consistent with text: "vLLM then stores the KV cache of the first 4 tokens in logical block 0 and the following 3 tokens in logical block 1. The remaining slot is reserved... At the first autoregressive decoding step generates the new token... stored [on physical blocks 7 and 1]... At the second decoding step... allocates a new physical block (physical block 3)")
-  - Block 3: empty (not yet allocated at the start of the example, becomes used in step ③)
-- "Block Table" (middle), columns: "Physical block number" | "# filled". Rows:
-  - Logical block 0 -> Physical block number 7, # filled 4/4 (shown as "7" and "4")
-  - Logical block 1 -> Physical block number 1, # filled 3/4 (shown as "1" and "3")
-  (table shows entries like "07 | 4/4" and "01 | 3/4" style, i.e., physical-block-number/filled-count pairs)
-- "Physical KV blocks (on GPU DRAM)" table on the right, 8 rows (Block 0 through Block 7), showing:
-  - Block 0: `years, ago, our, fathers` (this is physical block 1 content, i.e. logical block 1's data lives at physical slot index 1 — the right-hand table is literally indexed by physical block number 0..7)
-  - Block 1: `years, ago, our, fathers` (labelled physical block 1; highlighted yellow, matches block-table pointer for logical block 1)
-  - Block 2: empty
-  - Block 3: `Brought` (highlighted orange — this is the newly allocated physical block 3 created in step ③ when logical block 2 fills up)
-  - Block 4, 5, 6: empty
-  - Block 7: `Four, score, and, seven` (highlighted yellow — physical block 7 holds logical block 0's data)
-Numbered steps (as narrated in the body text, §4.3, corresponding to circled ①②③ markers in the figure):
-  - ① Prompt has 7 tokens ("Four score and seven years ago our"... actually prompt is "Four score and seven years ago our fathers" = 8 tokens per the annotation, but text says "the prompt has 7 tokens" for a different variant — use figure's own prompt "Four score and seven years ago our fathers", 8 tokens). vLLM maps the first 2 logical KV blocks (0 and 1) to 2 physical blocks (7 and 1 respectively). In the prefill step, it generates KV cache for the prompt + first output token, storing first 4 tokens' KV in logical block 0 and the following tokens in logical block 1 (one slot reserved).
-  - ② First autoregressive decoding step: generates new token ("brought") with PagedAttention on physical blocks 7 and 1; since one slot remains in the last logical block (block 1), the new KV is stored there and the block table's #filled count is updated (3->4).
-  - ③ Second decoding step: last logical block (block 1) is now full, so vLLM allocates a new physical block (physical block 3) for the new logical block (block 2) and records the mapping in the block table.
+DIAGRAM, the worked example for §4.3. Body text and figure annotation agree: prompt is **7 tokens**, not 8.
+
+- "Request A" at far left. Prompt: `"Four score and seven years ago our"`. Outputs: `"fathers"` → `"brought"` → …
+- "Logical KV blocks" (left), 4 rows:
+  - Block 0: `Four, score, and, seven` (4/4)
+  - Block 1: `years, ago, our` then `"fathers"` written in step ② (3/4 after ①, 4/4 after ②)
+  - Block 2: `brought` in first slot only — allocated in step ③
+  - Block 3: empty (dashes; not yet allocated)
+- "Block Table" (middle), columns: physical block number | # filled:
+  - Logical 0 → physical **7**, filled 4
+  - Logical 1 → physical **1**, filled **3→4** (the ② update)
+  - Logical 2 → physical **3**, filled 1 (the ③ allocation)
+  - Logical 3 → empty
+- "Physical KV blocks (on GPU DRAM)" (right), Block 0 through 7 (figure also draws an empty Block 8):
+  - Block 1: `years, ago, our, fathers` (after ②)
+  - Block 3: `brought` (after ③)
+  - Block 7: `Four, score, and, seven`
+  - Blocks 0, 2, 4, 5, 6: empty
+
+Numbered steps from §4.3 body text:
+  - **① Prefill.** Prompt has 7 tokens. vLLM maps logical 0 and 1 to physical 7 and 1. Prefill uses **conventional** self-attention (not PagedAttention). Stores first 4 tokens in logical 0 and the following 3 in logical 1; the remaining slot is reserved for generation. Does **not** reserve max sequence length.
+  - **② First decode.** PagedAttention on physical blocks 7 and 1 generates `"fathers"`. One slot remains in the last logical block, so the new KV is stored there; # filled updates 3→4. **No new physical block.**
+  - **③ Second decode.** Last logical block is full, so vLLM allocates a new physical block (**physical 3**) for new logical block 2, stores `"brought"`, records the mapping.
+
 Caption: "Block table translation in vLLM."
 
+The same Lincoln sentence is cut differently in Fig 3 (7 prompt KV states through `"our"`, current token `"brought"`) and Fig 5 (later snapshot, query `"forth"`). Fig 6 is the allocation walkthrough; do not mix the cuts.
+
 ### Figure 7 (page 6, right) — "Storing the KV cache of two requests at the same time in vLLM"
-DIAGRAM. Two independent request diagrams side by side, each structured like Fig 6 but simplified (yellow circle "Request A" on the left with its own Logical KV blocks table; green circle "Request B" on the right with its own Logical KV blocks table), both pointing into one shared "Physical KV blocks" table in the middle (8 rows, Block 0-7):
-- Request A logical blocks: Block 0 = `Four, score, and, seven`; Block 1 = `years, ago, our, fathers`; Block 2 = `brought` (partial, current iteration).
-- Request B logical blocks: Block 0 = `it, was, the, best`; Block 1 = `of, times` (partial, current iteration).
-- Shared physical table (center), Block 0-7, e.g.: Block 0 = `Four, score, and, seven`; Block 1 = `years, ago, our, fathers`; Block 2 = `it, was, the, best`; Block 3 = `brought` (highlighted, Request A's new block); Block 4 = `of, times` (Request B's second block); remaining blocks (5,6,7) empty/free.
-Point of figure: the two requests' logical blocks map to physical blocks that are interleaved / non-contiguous and not adjacent to each other, and empty physical blocks remain available for other requests. Caption: "Storing the KV cache of two requests at the same time in vLLM."
+DIAGRAM. Request A (left) and Request B (right), each with its own logical KV blocks, sharing one physical column (Block 0–7, plus an empty Block 8 in the figure).
+
+- Request A logical (continues Fig 6 after ③): Block 0 = `Four, score, and, seven`; Block 1 = `years, ago, our, fathers`; Block 2 = `brought` (partial).
+- Request B logical: Block 0 = `it, was, the, best`; Block 1 = `of, times` (partial); Block 2 empty.
+- Shared physical (paper figure placement):
+  - Block 1 = `years, ago, our, fathers` (A)
+  - Block 2 = `of, times` (B)
+  - Block 3 = `brought` (A)
+  - Block 5 = `it, was, the, best` (B)
+  - Block 7 = `Four, score, and, seven` (A)
+  - Blocks 0, 4, 6 (and 8) empty / free
+
+So A maps logical 0→7, 1→1, 2→3; B maps logical 0→**5**, 1→**2**. Neighboring logical blocks of either request need not be contiguous in GPU memory. Caption: "Storing the KV cache of two requests at the same time in vLLM."
 
 ### Figure 8 (page 7, left) — "Parallel sampling example"
 DIAGRAM. Two output-sample circles at top: "Sample A1" (left) and "Sample A2" (right), both derived from the same input request (parallel sampling, one prompt, two sampled outputs).
@@ -298,7 +310,7 @@ Single subplot, Normalized latency (s/token) 0.0-1.0 vs Request rate (req/s), x-
 - A CPU block allocator mirrors the GPU block allocator for swap space.
 
 **§4.3 Decoding with PagedAttention and vLLM**
-- Walks through single-sequence example (Fig 6): prompt fills logical blocks 0 and 1 (mapped to physical blocks 7 and 1) with one reserved slot in the last block; first decode step fills that last reserved slot; second decode step allocates a brand-new physical block once the previous logical block is full.
+- Walks through single-sequence example (Fig 6): 7-token prompt `"Four score and seven years ago our"` fills logical 0→phys 7 (4/4) and logical 1→phys 1 (3/4, one reserved); first decode stores `"fathers"` in that reserved slot (filled 3→4); second decode allocates physical 3 for logical 2 and stores `"brought"`.
 - Global per-iteration procedure: select candidate sequences for the batch, allocate physical blocks for newly required logical blocks, concatenate current-iteration input tokens across prefill and decode requests, run PagedAttention, save new KV into the assigned physical blocks.
 - When a request finishes, its blocks are freed back to the pool for other requests.
 
