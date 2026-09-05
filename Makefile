@@ -63,7 +63,7 @@ help:
 	@echo "make render-scene FILE=talk/s5_pagedattention.py SCENE=S5PagedAttention QUALITY=l"
 	@echo "make verify        Compile sources and regenerate narration"
 	@echo "make qa            Extract every rendered slide's resting frame to /tmp/qa"
-	@echo "make present       Open the keyboard-driven slide player"
+	@echo "make present       Open the keyboard-driven slide player (fits the screen)"
 	@echo "make html          Export the standalone reveal.js backup"
 	@echo "make all           Final render, narration, and HTML export"
 	@echo "make clean         Remove generated media, slides, HTML, and caches"
@@ -106,8 +106,11 @@ qa: check-env
 		$(PYTHON) tools/last_frames.py $$class || exit 1; \
 	done
 
+# Extra flags for the player, e.g. make present PRESENT_ARGS=-F
+PRESENT_ARGS ?=
+
 present: check-present-env
-	$(MANIM_SLIDES) present $(SCENE_CLASSES)
+	$(PYTHON) tools/present.py $(SCENE_CLASSES) $(PRESENT_ARGS)
 
 html: check-env
 	@mkdir -p $(DIST_DIR)

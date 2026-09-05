@@ -56,6 +56,14 @@ make render
 make present
 ```
 
+`make present` fits the Qt window to the current screen. High-quality
+renders are 1920×1080, which manim-slides otherwise opens 1:1 (too large
+for a Mac laptop, and not resizable). Full screen:
+
+```sh
+make present PRESENT_ARGS=-F
+```
+
 Controls:
 
 - Right / Left: next / previous beat

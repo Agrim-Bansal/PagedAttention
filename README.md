@@ -59,11 +59,15 @@ first):
 make present
 ```
 
-which runs:
+which runs `tools/present.py` (a thin wrapper around `manim-slides present`).
+The upstream player sizes the window to the render resolution — 1920×1080
+after `make render` — and locks that as the minimum size, so on a Mac
+laptop the window overflows and never rescales. The wrapper fits the
+window to the current screen; the videos stay 1080p. Pass `-F` for
+true full screen:
 
 ```
-.venv/bin/manim-slides present S0Title S1GPU S2Transformers S3KVCache S4Problem \
-  S5PagedAttention S6OSAndWhyHard S7Sharing S8Scheduling S9Results S10Ablations S11Takeaways
+make present PRESENT_ARGS=-F
 ```
 
 Presenter keyboard shortcuts (verified against the installed manim-slides
