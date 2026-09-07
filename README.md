@@ -111,6 +111,17 @@ references its video assets from a sibling `pagedattention_talk_assets/`
 folder, so keep the two together if you copy the HTML elsewhere; add
 `--one-file` to embed everything in a single, larger HTML file instead.)
 
+Publish that export to GitHub Pages (`gh-pages` branch; served at
+https://agrim-bansal.github.io/PagedAttention/):
+
+```
+make pages
+```
+
+which copies `dist/` onto `gh-pages` (as `index.html` plus assets and
+`.nojekyll`) without leaving `master`, then pushes. Rebuild with `make html`
+first if the videos changed.
+
 ### Rendering / editing a single scene
 
 Each scene file is independently renderable — useful while editing one scene
@@ -135,7 +146,8 @@ talk/
   CONTRACT.md            # authoritative API/spec contract for theme/components/scenes
 tools/
   build_narration.py     # regenerates NARRATION.md from scene docstrings
-Makefile                 # setup / render / render-low / present / html / narration / clean
+  publish_pages.py       # copies dist/ onto the gh-pages branch and pushes
+Makefile                 # setup / render / render-low / present / html / pages / narration / clean
 requirements.txt
 NARRATION.md             # generated speaker script — see below
 TALK_PLAN.md             # what each scene shows, build plan, key numbers

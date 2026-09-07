@@ -83,4 +83,14 @@ make all
 The browser backup is `dist/pagedattention_talk.html`. Keep its adjacent
 `pagedattention_talk_assets/` directory with it.
 
+Publish it to GitHub Pages (https://agrim-bansal.github.io/PagedAttention/):
+
+```sh
+make html
+make pages
+```
+
+`make pages` commits the export onto the `gh-pages` branch and pushes. The
+working tree on `master` stays put.
+
 List all targets with `make help`. Remove generated files with `make clean`.

@@ -52,7 +52,7 @@ SCENE ?= S0Title
 FILE ?= talk/s0_title.py
 QUALITY ?= l
 
-.PHONY: all help check-env check-present-env verify render render-low render-scene qa present html narration clean setup
+.PHONY: all help check-env check-present-env verify render render-low render-scene qa present html pages narration clean setup
 
 all: render narration html
 
@@ -65,6 +65,7 @@ help:
 	@echo "make qa            Extract every rendered slide's resting frame to /tmp/qa"
 	@echo "make present       Open the keyboard-driven slide player (fits the screen)"
 	@echo "make html          Export the standalone reveal.js backup"
+	@echo "make pages         Publish dist/ to the gh-pages branch"
 	@echo "make all           Final render, narration, and HTML export"
 	@echo "make clean         Remove generated media, slides, HTML, and caches"
 
@@ -122,6 +123,9 @@ html: check-env
 		-ctransition=none \
 		-cwidth=1920 \
 		-cheight=1080
+
+pages:
+	python3 tools/publish_pages.py
 
 narration: check-env
 	$(PYTHON) tools/build_narration.py
