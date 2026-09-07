@@ -120,7 +120,6 @@ html: check-env
 		-cslide_number=true \
 		-ccontrols=true \
 		-cprogress=true \
-		-ctransition=none \
 		-cwidth=1920 \
 		-cheight=1080
 
