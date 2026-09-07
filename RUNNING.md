@@ -83,7 +83,7 @@ make all
 The browser backup is `dist/pagedattention_talk.html`. Keep its adjacent
 `pagedattention_talk_assets/` directory with it.
 
-Publish it to GitHub Pages (https://agrim-bansal.github.io/PagedAttention/):
+Publish it to GitHub Pages (https://projects.agrimbansal.com/PagedAttention/):
 
 ```sh
 make html

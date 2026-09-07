@@ -1,192 +1,185 @@
-# PagedAttention Talk
+# PagedAttention
 
-A narrated Manim + [manim-slides](https://github.com/jeertmans/manim-slides) deck
-explaining Kwon et al., *"Efficient Memory Management for Large Language Model
-Serving with PagedAttention"* (SOSP '23) — the paper behind vLLM. Twelve scenes,
-grouped into three acts: why memory (not compute) is the bottleneck in LLM
-serving, the paper's core idea (page the KV cache like an OS pages memory), and
-what it buys you (throughput, sharing, ablations).
+A live, narrated [Manim](https://www.manim.community/) + [manim-slides](https://github.com/jeertmans/manim-slides) talk on Kwon et al., *"Efficient Memory Management for Large Language Model Serving with PagedAttention"* ([SOSP '23](https://dl.acm.org/doi/10.1145/3600006.3613165)) — the paper behind [vLLM](https://github.com/vllm-project/vllm).
+
+The bottleneck in LLM serving is leftover GPU memory, not FLOPs. Existing systems store each request's KV cache as one contiguous slab reserved to the model's maximum length, so only 20–38% of that memory holds real tokens. vLLM chops the cache into fixed-size blocks, maps them through a block table, and allocates on demand. Waste falls below one block per request; utilization hits **96.3%**; throughput is **2–4×** Orca at the same latency (up to **22×** FasterTransformer).
+
+Twelve scenes, three acts, every paper figure recreated as native animation (not screenshots). You talk over the resting frames; the deck advances on a keypress.
+
+**Watch:** [projects.agrimbansal.com/PagedAttention](https://projects.agrimbansal.com/PagedAttention/)
+
+## The talk
+
+One thread: leftover VRAM decides batch size, which decides throughput. The Lincoln prompt *"Four score and seven years ago our fathers brought forth"* is the running example through the KV-cache, problem, and mechanism scenes (the paper uses it in Figs. 3, 6, and 7).
+
+### Act I — Why memory is the bottleneck
+
+| # | Scene | What it shows | Figures |
+|---|-------|---------------|---------|
+| S0 | Title | Cost hook (~10× a keyword search) and three-act roadmap | — |
+| S1 | GPU | CPU vs GPU, VRAM vs DRAM, weights persist (~26 GB of 40), leftover VRAM = max batch | — |
+| S2 | Transformers | Closed box emits one word; open it for Key / Value / Query and softmax attention; prefill vs decode | Eqs. 1–3 |
+| S3 | KV cache | Recompute vs keep; 800 KB/token × 2048 = 1.6 GB reserved; ~7 max-length requests in 12 GB | Fig. 1 left |
+| S4 | The problem | Contiguous pre-allocation; reserved / internal / external waste; sharing is impossible | Figs. 2, 3 |
+
+### Act II — Page the KV cache
+
+| # | Scene | What it shows | Figures |
+|---|-------|---------------|---------|
+| S5 | PagedAttention | Change the *reader* first (Eq. 3 → 4, Fig. 5 live), then the manager (block table, on-demand blocks). Waste under one block; 96.3% | Figs. 5–7, 2 |
+| S6 | OS analogy | This *is* virtual memory — then why it is not a free port (no GPU MMU; fused kernel; 20–26% slower, still 2–4× end-to-end) | — |
+
+### Act III — What it buys you
+
+| # | Scene | What it shows | Figures |
+|---|-------|---------------|---------|
+| S7 | Sharing | Copy-on-write parallel sampling, beam-search tree, shared prefix. Three primitives: `fork` / `append` / `free` | Figs. 8–10 |
+| S8 | Scheduling | Overcommit, FCFS + preempt newest, all-or-nothing eviction, swap vs drop-and-prefill | Fig. 4 |
+| S9 | Results | Paper §6 in order: ShareGPT / Alpaca, latency vs rate, batch size, sharing, translation, chatbot | Figs. 1 right, 11–17 |
+| S10 | Ablations | Kernel overhead 20–26%; block-size sweet spot **16** | Fig. 18 |
+| S11 | Takeaways | Memory, not a new model. *What else could you page?* | — |
+
+No target duration — take the time the material needs. Math is shown as styled text, not LaTeX.
 
 ## Setup
 
-```
+```sh
 make setup
 ```
 
-This creates `.venv` and installs `requirements.txt` (`manim==0.21.0`,
-`manim-slides==5.6.0`). Equivalent manual steps:
+Creates `.venv` and installs `requirements.txt` (`manim==0.21.0`, `manim-slides==5.6.0`). Manual equivalent:
 
-```
+```sh
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 ```
 
 Requirements:
-- **ffmpeg** must be installed and on `PATH` (Manim shells out to it for
-  encoding). On macOS: `brew install ffmpeg`.
-- **No LaTeX is needed anywhere** — the deck uses Pango `Text`/`MarkupText`
-  only, never `Tex`/`MathTex`.
-- On macOS, the `pycairo`/`pangocairo` wheels that Manim depends on usually
-  install fine from pip. If a build fails, install the system libraries first
-  and retry: `brew install cairo pango pkg-config`.
 
-## Rendering, presenting, exporting
+- **ffmpeg** on `PATH` (Manim shells out to it). macOS: `brew install ffmpeg`.
+- **No LaTeX.** The deck uses Pango `Text` / `MarkupText` only — never `Tex` / `MathTex`.
+- On macOS, the `pycairo` / `pangocairo` wheels usually install from pip. If a build fails: `brew install cairo pango pkg-config`, then retry.
 
-All scenes live in `talk/`, one file each (`talk/sN_*.py`), each containing a
-single `manim_slides.Slide` subclass. `talk/theme.py` and `talk/components.py`
-hold the shared palette/fonts and reusable mobjects (token boxes, KV blocks,
-block tables, charts, etc.) — see `talk/CONTRACT.md` for their exact API.
+## Render and present
 
-Render every scene's video (high quality, `-qh`, writes to `media/` and
-`slides/`):
+Run everything from the repository root (`talk` must be importable as a package).
 
-```
-make render
+```sh
+make render-low    # draft, 480p — iterate here
+make render        # final, 1080p
+make present       # live player (needs a render first)
 ```
 
-Fast draft pass at low quality (`-ql`), useful while iterating:
+`make present` fits the Qt window to the current screen. High-quality renders are 1920×1080; manim-slides otherwise opens that size 1:1 (too large for a laptop, and not resizable). True full screen:
 
-```
-make render-low
-```
-
-Live-present the whole deck in order (all 12 scenes, keyboard-driven, opens a
-player window — needs `make render`/`render-low` to have produced slides
-first):
-
-```
-make present
-```
-
-which runs `tools/present.py` (a thin wrapper around `manim-slides present`).
-The upstream player sizes the window to the render resolution — 1920×1080
-after `make render` — and locks that as the minimum size, so on a Mac
-laptop the window overflows and never rescales. The wrapper fits the
-window to the current screen; the videos stay 1080p. Pass `-F` for
-true full screen:
-
-```
+```sh
 make present PRESENT_ARGS=-F
 ```
 
-Presenter keyboard shortcuts (verified against the installed manim-slides
-5.6.0 default keymap, `manim_slides/config.py`):
-
 | Key | Action |
-|---|---|
-| Right arrow | Next slide/beat |
-| Space | Play / pause the current animation |
-| Left arrow | Previous slide/beat |
-| V | Reverse (play the current slide backwards) |
-| R | Replay the current slide from the start |
+|-----|--------|
+| Right | Next beat |
+| Left | Previous beat |
+| Space | Play / pause |
+| R | Replay current beat |
+| V | Reverse the current beat |
 | F | Toggle full screen |
-| H | Hide / show mouse cursor |
+| H | Hide / show cursor |
 | Q | Quit |
 
-(`manim-slides present --help` documents the CLI flags, e.g. `--full-screen`,
-`--start-at-scene-number`, `--skip-all` for a dry-run smoke test; it does not
-print the keymap, which lives in `manim_slides/config.py`'s `Keys` model.)
+Start at a later scene with `--start-at-scene-number N`. `manim-slides present --help` lists CLI flags; the keymap lives in `manim_slides/config.py`.
 
-Export a standalone reveal.js HTML backup (no player app needed, just a
-browser) to `dist/pagedattention_talk.html`:
+### One scene while editing
 
-```
-make html
+```sh
+make render-scene FILE=talk/s5_pagedattention.py SCENE=S5PagedAttention QUALITY=l
+.venv/bin/manim-slides present S5PagedAttention
 ```
 
-which runs:
+Use `QUALITY=h` for the 1080p pass.
 
-```
-.venv/bin/manim-slides convert S0Title S1GPU S2Transformers S3KVCache S4Problem \
-  S5PagedAttention S6OSAndWhyHard S7Sharing S8Scheduling S9Results S10Ablations S11Takeaways \
-  dist/pagedattention_talk.html --to html \
-  -cslide_number=true -ccontrols=true -cprogress=true -ctransition=none \
-  -cwidth=1920 -cheight=1080
-```
+### Check and inspect
 
-(`-c`/`--config` options are reveal.js settings; see
-`manim-slides convert --to html --show-config` for the full list. The export
-references its video assets from a sibling `pagedattention_talk_assets/`
-folder, so keep the two together if you copy the HTML elsewhere; add
-`--one-file` to embed everything in a single, larger HTML file instead.)
-
-Publish that export to GitHub Pages (`gh-pages` branch; served at
-https://agrim-bansal.github.io/PagedAttention/):
-
-```
-make pages
+```sh
+make verify    # compile talk/ + tools/, regenerate NARRATION.md
+make qa        # resting frame of every slide → /tmp/qa/<SceneClass>/
+make help      # all targets
 ```
 
-which copies `dist/` onto `gh-pages` (as `index.html` plus assets and
-`.nojekyll`) without leaving `master`, then pushes. Rebuild with `make html`
-first if the videos changed.
+The QA PNGs are the frames that stay on screen while the presenter talks.
 
-### Rendering / editing a single scene
+## Export and publish
 
-Each scene file is independently renderable — useful while editing one scene
-without waiting for all twelve:
-
-```
-.venv/bin/manim-slides render -ql talk/s5_pagedattention.py S5PagedAttention   # fast draft
-.venv/bin/manim-slides render -qh talk/s5_pagedattention.py S5PagedAttention   # final quality
-.venv/bin/manim-slides present S5PagedAttention                                # preview it alone
+```sh
+make html      # reveal.js backup → dist/pagedattention_talk.html
+make pages     # copy dist/ onto gh-pages and push
+make all       # render + narration + html
 ```
 
-Always render from the project root (`talk` must be importable as a package).
+Keep `pagedattention_talk.html` next to `pagedattention_talk_assets/` if you copy the export. Add `--one-file` to the convert command to embed everything in a single (larger) HTML file.
 
-## File layout
-
-```
-talk/
-  theme.py               # palette, fonts, sizes, apply_theme(), act_checkpoint()
-  components.py          # reusable mobjects: TokenBox, KVBlock, BlockTable, charts, ...
-  s0_title.py .. s11_takeaways.py   # one Slide subclass per scene, in talk order
-  scratch_components.py  # exercises every component, for smoke-testing components.py
-  CONTRACT.md            # authoritative API/spec contract for theme/components/scenes
-tools/
-  build_narration.py     # regenerates NARRATION.md from scene docstrings
-  publish_pages.py       # copies dist/ onto the gh-pages branch and pushes
-Makefile                 # setup / render / render-low / present / html / pages / narration / clean
-requirements.txt
-NARRATION.md             # generated speaker script — see below
-TALK_PLAN.md             # what each scene shows, build plan, key numbers
-PLANNING_NOTES.md        # planning/process notes
-paper_notes/PAPER_REFERENCE.md   # extracted facts/figures from the paper
-vllm.pdf                 # the source paper
-```
+`make pages` writes `index.html` onto the `gh-pages` branch without leaving `master`. Rebuild with `make html` first if the videos changed.
 
 ## Speaker script
 
-`NARRATION.md` is the full speaker script: one section per scene, each beat's
-talking points, generated from the `NARRATION` section of that scene's module
-docstring. Regenerate it after editing any scene's narration:
+`NARRATION.md` is generated from the `NARRATION` section of each scene's module docstring. Do not hand-edit it. After changing spoken text in a `talk/sN_*.py` docstring:
 
-```
+```sh
 make narration
 ```
 
-which runs `tools/build_narration.py` — a small, dependency-light script (only
-`ast`/`re`, no manim import) that reads each `talk/sN_*.py`'s docstring and
-writes the combined script with a per-act table of contents
-pulled from `talk/CONTRACT.md`'s scene table.
+`[PAUSE]` markers in the script are audience-interaction beats.
 
-## Cleaning up
+## Layout
 
 ```
+talk/
+  s0_title.py … s11_takeaways.py   one Slide subclass per scene, talk order
+  theme.py                         palette, fonts, act_checkpoint()
+  components.py                    TokenBox, KVBlock, BlockTable, charts, …
+  scratch_components.py            exercises every shared mobject
+  CONTRACT.md                      binding API / beat-count / color spec
+  SCENE_BRIEF.md                   writer + visual-QA notes
+tools/
+  present.py                       screen-fitting wrapper around manim-slides
+  build_narration.py               docstring → NARRATION.md
+  last_frames.py                   resting-frame PNGs for visual QA
+  publish_pages.py                 dist/ → gh-pages
+paper_notes/PAPER_REFERENCE.md     extracted facts and figures from the paper
+TALK_PLAN.md                       executable narrative spec
+NARRATION.md                       generated speaker script
+RUNNING.md                         shorter command cheat-sheet
+vllm.pdf                           the source paper
+```
+
+## Key numbers
+
+Kept consistent across scenes; source of truth is `paper_notes/PAPER_REFERENCE.md`.
+
+| Fact | Value |
+|------|--------|
+| OPT-13B on A100-40GB | ~65% weights (26 GB), &gt;30% KV cache (12 GB) |
+| KV cache per token (OPT-13B) | 800 KB → 1.6 GB at 2048 tokens |
+| Token-state utilization | existing 20.4–38.2%; vLLM **96.3%** |
+| Throughput vs Orca | **2–4×** at the same latency |
+| vs FasterTransformer | up to **22×** request rate |
+| Concurrent batch (OPT-13B) | 7 → 30 (ShareGPT), 7 → 132 (Alpaca) |
+| Default block size | **16** tokens |
+| PagedAttention kernel | ~20–26% slower than FasterTransformer; net still 2–4× |
+
+## Clean
+
+```sh
 make clean
 ```
 
-removes `media/`, `slides/`, `dist/`, and `__pycache__` directories (rendered
-video/slide artifacts and the HTML export — everything `make render`/`make
-html` produce; source files are untouched).
+Removes `media/`, `slides/`, `dist/`, and `__pycache__`. Source files are untouched.
 
 ## Further reading
 
-- `talk/CONTRACT.md` — the binding spec for `theme.py`/`components.py`'s API
-  and per-scene structure (beat counts, color conventions).
-- `TALK_PLAN.md` — what each scene covers, the paper-figure-to-scene mapping,
-  and the key numbers that must stay consistent across scenes.
-- `PLANNING_NOTES.md` — process/planning notes behind the deck.
-- `paper_notes/PAPER_REFERENCE.md` — facts and figures extracted from
-  `vllm.pdf`, used as the source of truth for every number shown on screen.
+- [`RUNNING.md`](RUNNING.md) — command cheat-sheet
+- [`TALK_PLAN.md`](TALK_PLAN.md) — what each scene covers and the figure-to-scene map
+- [`talk/CONTRACT.md`](talk/CONTRACT.md) — theme / component API and per-scene beat counts
+- [`paper_notes/PAPER_REFERENCE.md`](paper_notes/PAPER_REFERENCE.md) — numbers and figures extracted from `vllm.pdf`
+- [`PLANNING_NOTES.md`](PLANNING_NOTES.md) — decisions behind the deck
