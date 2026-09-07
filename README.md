@@ -113,11 +113,14 @@ The QA PNGs are the frames that stay on screen while the presenter talks.
 
 ```sh
 make html      # reveal.js backup → dist/pagedattention_talk.html
+make video     # one MP4 of every beat → dist/pagedattention.mp4
 make pages     # copy dist/ onto gh-pages and push
 make all       # render + narration + html
 ```
 
 Keep `pagedattention_talk.html` next to `pagedattention_talk_assets/` if you copy the export. Add `--one-file` to the convert command to embed everything in a single (larger) HTML file.
+
+`make video` stitches the rendered clips (no live-talk pause holds, silent audio) for YouTube. Render first (`make render`). Upload `dist/pagedattention.mp4` at [youtube.com/upload](https://www.youtube.com/upload).
 
 `make pages` writes `index.html` onto the `gh-pages` branch without leaving `master`. Rebuild with `make html` first if the videos changed.
 
@@ -145,6 +148,7 @@ tools/
   present.py                       screen-fitting wrapper around manim-slides
   build_narration.py               docstring → NARRATION.md
   last_frames.py                   resting-frame PNGs for visual QA
+  build_video.py                   beat clips → dist/pagedattention.mp4
   publish_pages.py                 dist/ → gh-pages
 paper_notes/PAPER_REFERENCE.md     extracted facts and figures from the paper
 TALK_PLAN.md                       executable narrative spec

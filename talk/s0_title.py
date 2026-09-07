@@ -152,7 +152,7 @@ class S0Title(Slide):
         subtitle.next_to(main_title, DOWN, buff=0.6)
 
         presenter = text(
-            "Presented by Agrim Bansal, Harit Mangal",
+            "Presented by Agrim Bansal",
             font_size=SMALL_SIZE,
             color=MUTED,
         )

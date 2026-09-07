@@ -52,7 +52,7 @@ SCENE ?= S0Title
 FILE ?= talk/s0_title.py
 QUALITY ?= l
 
-.PHONY: all help check-env check-present-env verify render render-low render-scene qa present html pages narration clean setup
+.PHONY: all help check-env check-present-env verify render render-low render-scene qa present html video pages narration clean setup
 
 all: render narration html
 
@@ -65,6 +65,7 @@ help:
 	@echo "make qa            Extract every rendered slide's resting frame to /tmp/qa"
 	@echo "make present       Open the keyboard-driven slide player (fits the screen)"
 	@echo "make html          Export the standalone reveal.js backup"
+	@echo "make video         Concatenate every beat into dist/pagedattention.mp4"
 	@echo "make pages         Publish dist/ to the gh-pages branch"
 	@echo "make all           Final render, narration, and HTML export"
 	@echo "make clean         Remove generated media, slides, HTML, and caches"
@@ -122,6 +123,12 @@ html: check-env
 		-cprogress=true \
 		-cwidth=1920 \
 		-cheight=1080
+
+video: check-env
+	@for class in $(SCENE_CLASSES); do \
+		test -f slides/$$class.json || (echo "Missing slides/$$class.json; render first" && exit 1); \
+	done
+	$(PYTHON) tools/build_video.py
 
 pages:
 	python3 tools/publish_pages.py

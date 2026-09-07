@@ -83,7 +83,17 @@ make all
 The browser backup is `dist/pagedattention_talk.html`. Keep its adjacent
 `pagedattention_talk_assets/` directory with it.
 
-Publish it to GitHub Pages (https://projects.agrimbansal.com/PagedAttention/):
+Concatenate every rendered beat into one silent MP4 for YouTube:
+
+```sh
+make render
+make video
+```
+
+The file is `dist/pagedattention.mp4`. This is the animation only — not the
+live talk, and not the pause holds you speak over.
+
+Publish the HTML backup to GitHub Pages (https://projects.agrimbansal.com/PagedAttention/):
 
 ```sh
 make html
